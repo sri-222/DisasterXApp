@@ -1,8 +1,4 @@
-import { firebaseAuth, firebaseFirestore } from '../config/firebaseConfig';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
-
-const USERS_COLLECTION = 'users';
+const API_BASE_URL = 'http://localhost:4000'; // Adjust this to your backend URL
 
 export interface SignupPayload {
   name: string;
@@ -13,8 +9,10 @@ export interface SignupPayload {
 }
 
 export interface SignupResponse {
-  success: true;
+  success: boolean;
   userId: string;
+  email: string;
+  role: string;
 }
 
 export interface UserProfile {
@@ -28,8 +26,17 @@ export interface UserProfile {
 }
 
 export interface LoginResponse {
+  success: boolean;
   token: string;
-  user?: UserProfile;
+  sessionId: string;
+  expiresAt: string;
+  ttlMs: number;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
 }
 
 function normalizeEmail(value: string) {
@@ -41,56 +48,47 @@ function normalizeRole(role?: string) {
   return cleaned && cleaned.length ? cleaned : 'responder';
 }
 
-function timestampToIso(value: string | Timestamp | null | undefined) {
-  if (!value) return undefined;
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value instanceof Timestamp) {
-    return value.toDate().toISOString();
-  }
-  return undefined;
-}
-
 export async function login(payload: { email: string; password: string }): Promise<LoginResponse> {
-  const credential = await signInWithEmailAndPassword(firebaseAuth, payload.email, payload.password);
-  const token = await credential.user.getIdToken();
-  const userRef = doc(firebaseFirestore, USERS_COLLECTION, credential.user.uid);
-  const snapshot = await getDoc(userRef);
+  const response = await fetch(`${API_BASE_URL}/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: payload.email,
+      password: payload.password,
+    }),
+  });
 
-  const userData = snapshot.data();
-  const user: UserProfile | undefined = userData
-    ? {
-        id: snapshot.id,
-        name: typeof userData.name === 'string' ? userData.name : '',
-        email:
-          typeof userData.email === 'string'
-            ? userData.email
-            : normalizeEmail(payload.email),
-        phone: typeof userData.phone === 'string' ? userData.phone : null,
-        role: normalizeRole(typeof userData.role === 'string' ? userData.role : undefined),
-        status: typeof userData.status === 'string' ? userData.status : 'active',
-        createdAt: timestampToIso(userData.createdAt),
-      }
-    : undefined;
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Login failed' }));
+    throw new Error(errorData.error || 'Login failed');
+  }
 
-  return { token, user };
+  const data = await response.json();
+  return data;
 }
 
 export async function signup(payload: SignupPayload): Promise<SignupResponse> {
-  const credential = await createUserWithEmailAndPassword(
-    firebaseAuth,
-    payload.email,
-    payload.password
-  );
-  const userRef = doc(firebaseFirestore, USERS_COLLECTION, credential.user.uid);
-  await setDoc(userRef, {
-    name: payload.name.trim(),
-    email: normalizeEmail(payload.email),
-    phone: payload.phone?.trim() || null,
-    role: normalizeRole(payload.role),
-    status: 'active',
-    createdAt: serverTimestamp(),
+  const response = await fetch(`${API_BASE_URL}/signup`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: payload.name,
+      email: payload.email,
+      password: payload.password,
+      phone: payload.phone,
+      role: payload.role,
+    }),
   });
-  return { success: true, userId: credential.user.uid };
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Signup failed' }));
+    throw new Error(errorData.error || 'Signup failed');
+  }
+
+  const data = await response.json();
+  return data;
 }
