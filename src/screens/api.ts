@@ -306,11 +306,41 @@ export async function getLiveAlerts(limit = 6): Promise<LiveAlertEvent[]> {
   return result.data;
 }
 
+const OFFICIAL_SEVERITIES: OfficialAlert['severity'][] = ['Danger', 'Warning', 'Info', 'Safe'];
+
+function readTimestamp(value: unknown): string {
+  if (typeof value === 'string') return value;
+  const seconds = (value as any)?._seconds ?? (value as any)?.seconds;
+  return typeof seconds === 'number' ? new Date(seconds * 1000).toISOString() : '';
+}
+
+// Older alerts in the database can be missing fields or carry a raw Firestore
+// timestamp. Rendering those as-is crashed the Alerts screen, so coerce every
+// alert into the shape the UI expects and drop anything that isn't an object.
+export function normalizeOfficialAlert(raw: any, index: number): OfficialAlert | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
+  return {
+    id: str(raw.id, `alert-${index}`),
+    title: str(raw.title, 'Alert'),
+    message: str(raw.message, ''),
+    severity: OFFICIAL_SEVERITIES.includes(raw.severity) ? raw.severity : 'Info',
+    location: str(raw.location, 'Unknown'),
+    lat: typeof raw.lat === 'number' ? raw.lat : null,
+    lon: typeof raw.lon === 'number' ? raw.lon : null,
+    source: str(raw.source, 'manual'),
+    timestamp: readTimestamp(raw.timestamp),
+  };
+}
+
 export async function getOfficialAlerts(limit = 20): Promise<OfficialAlert[]> {
-  const result = await apiFetch<{ success: boolean; data: OfficialAlert[] }>(
+  const result = await apiFetch<{ success: boolean; data: unknown }>(
     `/alerts?limit=${limit}`
   );
-  return result.data;
+  if (!Array.isArray(result?.data)) return [];
+  return result.data
+    .map(normalizeOfficialAlert)
+    .filter((alert): alert is OfficialAlert => alert !== null);
 }
 
 export async function getWeather(lat: number, lon: number): Promise<WeatherData> {

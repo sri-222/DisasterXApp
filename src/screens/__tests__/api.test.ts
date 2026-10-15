@@ -195,10 +195,29 @@ describe('control room data', () => {
   it('getOfficialAlerts reads broadcast alerts without needing a login', async () => {
     const alert = { id: 'a1', title: 'Flood warning', message: 'Move to higher ground', severity: 'Danger' };
     global.fetch = jest.fn(() => jsonResponse(200, { success: true, data: [alert] })) as any;
-    await expect(getOfficialAlerts(5)).resolves.toEqual([alert]);
+    const [received] = await getOfficialAlerts(5);
+    expect(received).toMatchObject(alert);
     const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
     expect(url).toBe(`${DEFAULT_API_BASE_URL}/alerts?limit=5`);
     expect(options.headers?.Authorization).toBeUndefined();
+  });
+
+  it('getOfficialAlerts reshapes alerts left by the old backend instead of passing them through', async () => {
+    const legacy = [
+      { deviceId: 'sensor-1', value: 91, message: 'High value', severity: 'Danger', timestamp: { _seconds: 1760000000, _nanoseconds: 0 } },
+      { title: 'No severity', message: 'x' },
+      null,
+    ];
+    global.fetch = jest.fn(() => jsonResponse(200, { success: true, data: legacy })) as any;
+    const alerts = await getOfficialAlerts();
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0]).toMatchObject({ id: 'alert-0', title: 'Alert', severity: 'Danger', timestamp: new Date(1760000000 * 1000).toISOString() });
+    expect(alerts[1]).toMatchObject({ id: 'alert-1', severity: 'Info', timestamp: '' });
+  });
+
+  it('getOfficialAlerts returns an empty list when data is not an array', async () => {
+    global.fetch = jest.fn(() => jsonResponse(200, { success: true, data: { oops: true } })) as any;
+    await expect(getOfficialAlerts()).resolves.toEqual([]);
   });
 
   it('getMySosHistory passes through the dispatch status and team', async () => {

@@ -46,7 +46,10 @@ export function describeRequestStatus(status: string) {
 
 export function timeAgo(iso: string | null | undefined) {
   if (!iso) return '';
-  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  const time = new Date(iso).getTime();
+  // Hermes throws on toLocaleDateString() for an invalid date.
+  if (Number.isNaN(time)) return '';
+  const minutes = Math.floor((Date.now() - time) / 60000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.floor(minutes / 60);
