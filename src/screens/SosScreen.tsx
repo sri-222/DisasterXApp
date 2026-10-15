@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -23,10 +23,16 @@ import {
   PhoneCall,
   Asterisk,
 } from 'lucide-react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import BottomTabBar from '../component/BottomTabBar';
 import { useLocation } from './LocationContext';
-import { submitSos, CrisisType } from './api';
+import { submitSos, getMySosHistory, CrisisType, SosReport } from './api';
 import { colors } from '../theme';
+import { describeSosStatus, timeAgo } from '../services/sosStatus';
+
+// How often to re-check the latest SOS while this screen is open, so the
+// person sees the control room acknowledge and dispatch without reopening it.
+const STATUS_REFRESH_MS = 15_000;
 
 const EMERGENCY_DIAL_NUMBER = '112';
 
@@ -47,6 +53,21 @@ const SOSScreen: React.FC = () => {
   const [selectedCrisis, setSelectedCrisis] = useState<CrisisType>('Flood');
   const [submitting, setSubmitting] = useState(false);
   const { currentLocation, latitude, longitude } = useLocation();
+  const [latestSos, setLatestSos] = useState<SosReport | null>(null);
+
+  const refreshLatestSos = useCallback(() => {
+    getMySosHistory()
+      .then(reports => setLatestSos(reports[0] ?? null))
+      .catch(() => {});
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshLatestSos();
+      const timer = setInterval(refreshLatestSos, STATUS_REFRESH_MS);
+      return () => clearInterval(timer);
+    }, [refreshLatestSos])
+  );
 
   const handleSendSos = async () => {
     if (submitting) return;
@@ -60,8 +81,9 @@ const SOSScreen: React.FC = () => {
       });
       Alert.alert(
         'SOS Sent',
-        'Your emergency alert has been submitted with your current location. Responders have been notified.'
+        'Your emergency alert has been submitted with your current location. You will see here when a rescue team is on the way.'
       );
+      refreshLatestSos();
     } catch (err: any) {
       Alert.alert(
         'Could not send SOS',
@@ -185,6 +207,20 @@ const SOSScreen: React.FC = () => {
           <Text style={styles.sosInstructions}>Tap SOS to broadcast your location and crisis type</Text>
         </View>
 
+        {/* LATEST SOS STATUS FROM THE CONTROL ROOM */}
+        {latestSos && (() => {
+          const status = describeSosStatus(latestSos);
+          return (
+            <View style={[styles.statusCard, { borderLeftColor: status.color }]}>
+              <Text style={styles.statusCardLabel}>
+                {`YOUR LAST SOS · ${latestSos.crisisType.toUpperCase()} · ${timeAgo(latestSos.createdAt)}`}
+              </Text>
+              <Text style={[styles.statusCardTitle, { color: status.color }]}>{status.label}</Text>
+              <Text style={styles.statusCardDetail}>{status.detail}</Text>
+            </View>
+          );
+        })()}
+
         {/* ACTION BUTTONS */}
         <TouchableOpacity style={styles.confirmBtn} onPress={handleSendSos} disabled={submitting}>
           <Text style={styles.confirmBtnText}>
@@ -205,6 +241,30 @@ const SOSScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  statusCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 15,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+  },
+  statusCardLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: colors.textFaint,
+    letterSpacing: 0.5,
+  },
+  statusCardTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  statusCardDetail: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 18,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.background,

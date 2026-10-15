@@ -87,6 +87,9 @@ export interface SosPayload {
   address?: string;
 }
 
+// Set by the control room: active -> acknowledged -> dispatched -> resolved.
+export type SosStatus = 'active' | 'acknowledged' | 'dispatched' | 'resolved';
+
 export interface SosReport {
   id: string;
   userId: string;
@@ -94,8 +97,24 @@ export interface SosReport {
   latitude: number | null;
   longitude: number | null;
   address: string | null;
-  status: string;
+  status: SosStatus | string;
+  assignedTeam?: string | null;
+  note?: string | null;
   createdAt: string;
+  updatedAt?: string | null;
+}
+
+// An alert broadcast by authorities from the control room.
+export interface OfficialAlert {
+  id: string;
+  title: string;
+  message: string;
+  severity: 'Danger' | 'Warning' | 'Info' | 'Safe';
+  location: string;
+  lat: number | null;
+  lon: number | null;
+  source: string;
+  timestamp: string;
 }
 
 export type HelpCategory = 'Food' | 'Medicine' | 'Shelter' | 'Other';
@@ -283,6 +302,13 @@ export async function restoreSession(): Promise<UserProfile | null> {
 export async function getLiveAlerts(limit = 6): Promise<LiveAlertEvent[]> {
   const result = await apiFetch<{ success: boolean; data: LiveAlertEvent[] }>(
     `/alerts/live?limit=${limit}`
+  );
+  return result.data;
+}
+
+export async function getOfficialAlerts(limit = 20): Promise<OfficialAlert[]> {
+  const result = await apiFetch<{ success: boolean; data: OfficialAlert[] }>(
+    `/alerts?limit=${limit}`
   );
   return result.data;
 }

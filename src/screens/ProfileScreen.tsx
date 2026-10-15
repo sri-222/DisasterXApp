@@ -44,6 +44,7 @@ import {
   logout,
   UserProfile,
 } from './api';
+import { describeRequestStatus } from '../services/sosStatus';
 import { clearToken } from '../services/authSession';
 import { clearUserProfile } from '../services/userProfileStorage';
 
@@ -344,7 +345,7 @@ const ProfileScreen: React.FC = () => {
               </View>
               <View style={styles.requestStatusCol}>
                 <Text style={[styles.statusPrimary, item.urgent && { color: colors.danger }]}>
-                  {item.status}
+                  {describeRequestStatus(item.status)}
                 </Text>
                 <Text style={styles.statusTime}>{formatRequestTime(item.createdAt)}</Text>
               </View>
