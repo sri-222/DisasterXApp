@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AppHeader from './AppHeader';
+import SkyBackground, { SkyTone } from '../component/SkyBackground';
 import {
   Cloud,
   CloudFog,
@@ -39,15 +40,15 @@ function formatTime(iso: string | null | undefined): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// Hero colour and icon follow the live conditions.
-const MOOD_STYLE: Record<WeatherMood, { background: string; accent: string; Icon: typeof Sun }> = {
-  clear: { background: '#F57C00', accent: '#FFE0B2', Icon: Sun },
-  cloudy: { background: '#546E7A', accent: '#CFD8DC', Icon: CloudSun },
-  rain: { background: '#1565C0', accent: '#BBDEFB', Icon: CloudRain },
-  storm: { background: '#37474F', accent: '#FFD54F', Icon: CloudLightning },
-  fog: { background: '#78909C', accent: '#ECEFF1', Icon: CloudFog },
-  snow: { background: '#0277BD', accent: '#E1F5FE', Icon: CloudSnow },
-  unknown: { background: colors.info, accent: colors.infoLight, Icon: Cloud },
+// The sky and the icon follow the live conditions.
+const MOOD_STYLE: Record<WeatherMood, { tone: SkyTone; Icon: typeof Sun }> = {
+  clear: { tone: 'clear', Icon: Sun },
+  cloudy: { tone: 'cloudy', Icon: CloudSun },
+  rain: { tone: 'rain', Icon: CloudRain },
+  storm: { tone: 'storm', Icon: CloudLightning },
+  fog: { tone: 'cloudy', Icon: CloudFog },
+  snow: { tone: 'rain', Icon: CloudSnow },
+  unknown: { tone: 'clear', Icon: Cloud },
 };
 
 const TIP_STYLE: Record<SafetyTip['level'], { color: string; background: string }> = {
@@ -95,15 +96,16 @@ const WeatherScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <SkyBackground tone={mood.tone} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      <AppHeader showLogo={false} showLocation showProfileBtn showBackButton />
+      <AppHeader showLogo={false} showLocation showProfileBtn showBackButton variant="dark" />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.info} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.white} colors={[colors.info]} />
         }
       >
         <Text style={styles.kicker}>LIVE WEATHER</Text>
@@ -139,12 +141,12 @@ const WeatherScreen: React.FC = () => {
 
         {weather && (
           <>
-            <View style={[styles.hero, { backgroundColor: mood.background }]}>
+            <View style={styles.hero}>
               <View style={styles.heroTop}>
                 <View>
                   <Text style={styles.heroTemp}>{round(weather.temperature, '°')}</Text>
                   <Text style={styles.heroConditions}>{weather.conditions}</Text>
-                  <Text style={[styles.heroFeels, { color: mood.accent }]}>
+                  <Text style={styles.heroFeels}>
                     Feels like {round(weather.feelsLike, '°C')}
                   </Text>
                 </View>
@@ -152,7 +154,7 @@ const WeatherScreen: React.FC = () => {
                   <MoodIcon size={64} color={colors.white} />
                 </View>
               </View>
-              {error && <Text style={[styles.heroNote, { color: mood.accent }]}>Showing the last reading. {error}</Text>}
+              {error && <Text style={styles.heroNote}>Showing the last reading. {error}</Text>}
             </View>
 
             <View style={styles.metricsRow}>
@@ -219,7 +221,7 @@ const WeatherScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#2F80ED',
   },
   scrollContent: {
     paddingHorizontal: spacing.xl,
@@ -229,18 +231,19 @@ const styles = StyleSheet.create({
   kicker: {
     fontSize: 12,
     fontWeight: '800',
-    color: colors.info,
-    letterSpacing: 0.5,
+    color: 'rgba(255,255,255,0.85)',
+    letterSpacing: 1,
   },
   title: {
     fontSize: 26,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: colors.white,
     marginTop: spacing.xs,
     marginBottom: spacing.lg,
   },
   card: {
-    backgroundColor: colors.surface,
+    // Frosted white so the sky shows through a little.
+    backgroundColor: 'rgba(255,255,255,0.88)',
     borderRadius: radii.lg,
     padding: spacing.lg,
     marginBottom: spacing.lg,
@@ -275,7 +278,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     padding: spacing.xl,
     marginBottom: spacing.lg,
-    ...shadow.card,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   heroTop: {
     flexDirection: 'row',
@@ -294,6 +299,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   heroFeels: {
+    color: 'rgba(255,255,255,0.9)',
     fontSize: 14,
     fontWeight: '600',
     marginTop: spacing.xs,
@@ -307,6 +313,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroNote: {
+    color: 'rgba(255,255,255,0.9)',
     fontSize: 12,
     marginTop: spacing.md,
   },
@@ -383,7 +390,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     fontSize: 11,
-    color: colors.textFaint,
+    color: colors.textSecondary,
     textAlign: 'center',
   },
 });
