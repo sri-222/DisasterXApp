@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -21,13 +21,24 @@ import {
   Send,
   PhoneCall,
   Asterisk,
+  RefreshCw,
 } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import BottomTabBar from '../component/BottomTabBar';
 import { useLocation, usableAddress } from './LocationContext';
-import { submitSos, getMySosHistory, CrisisType, SosReport } from './api';
+import { getMySosHistory, CrisisType, SosReport } from './api';
 import { colors } from '../theme';
-import { describeSosStatus, timeAgo } from '../services/sosStatus';
+import { describeOutboxItem, describeSosStatus, timeAgo } from '../services/sosStatus';
+import LocationMap from '../component/LocationMap';
+import { CONNECTION_COPY, useConnection } from '../services/ConnectionContext';
+import { OutboxItem, retryPendingMessages, sendSOS, subscribeOutbox } from '../services/sosOutbox';
+
+const MODE_COLOR = {
+  checking: colors.textFaint,
+  online: colors.success,
+  gateway: colors.warning,
+  offline: colors.danger,
+};
 
 // How often to re-check the latest SOS while this screen is open, so the
 // person sees the control room acknowledge and dispatch without reopening it.
@@ -53,6 +64,13 @@ const SOSScreen: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const { currentLocation, latitude, longitude, fetchLocation } = useLocation();
   const [latestSos, setLatestSos] = useState<SosReport | null>(null);
+  const { mode, refresh: refreshConnection } = useConnection();
+  const [outbox, setOutbox] = useState<OutboxItem[]>([]);
+  const [retrying, setRetrying] = useState(false);
+
+  useEffect(() => subscribeOutbox(setOutbox), []);
+  // SOS that haven't reached the control room yet, newest first.
+  const unsent = outbox.filter(item => item.state !== 'server_accepted');
 
   const refreshLatestSos = useCallback(() => {
     getMySosHistory()
@@ -78,26 +96,40 @@ const SOSScreen: React.FC = () => {
       if (!coords) {
         coords = await fetchLocation().catch(() => null);
       }
-      await submitSos({
-        crisisType: selectedCrisis,
-        latitude: coords?.latitude,
-        longitude: coords?.longitude,
-        address: coords ? usableAddress(currentLocation) : undefined,
-      });
-      Alert.alert(
-        'SOS Sent',
-        coords
-          ? 'Your emergency alert was sent with your location. This screen shows when a rescue team is on the way.'
-          : 'Your emergency alert was sent, but your location could not be found. Turn on location, or call for help directly below.'
+      const item = await sendSOS(
+        {
+          crisisType: selectedCrisis,
+          latitude: coords?.latitude,
+          longitude: coords?.longitude,
+          address: coords ? usableAddress(currentLocation) : undefined,
+        },
+        mode === 'checking' ? undefined : mode
       );
+      const outcome = describeOutboxItem(item);
+      const noLocation = coords
+        ? ''
+        : '\n\nYour location could not be found. Turn on location, or call 112 below.';
+      Alert.alert(outcome.label, outcome.detail + noLocation);
       refreshLatestSos();
+      refreshConnection();
     } catch (err: any) {
+      // Only reached if the phone could not even save the SOS.
       Alert.alert(
         'Could not send SOS',
-        err.message || 'Please check your connection and try again, or use Direct Call below.'
+        err?.message || 'Please call 112 using Direct Call below.'
       );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await retryPendingMessages(await refreshConnection());
+    } finally {
+      setRetrying(false);
+      refreshLatestSos();
     }
   };
 
@@ -114,10 +146,15 @@ const SOSScreen: React.FC = () => {
       {/* HEADER */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
-        <View style={styles.systemBadge}>
-          <View style={styles.systemDot} />
-          <Text style={styles.systemText}>SYSTEM ACTIVE</Text>
-        </View>
+        <TouchableOpacity
+          style={[styles.systemBadge, { borderColor: MODE_COLOR[mode] }]}
+          onPress={() => Alert.alert(CONNECTION_COPY[mode].label, CONNECTION_COPY[mode].detail)}
+        >
+          <View style={[styles.systemDot, { backgroundColor: MODE_COLOR[mode] }]} />
+          <Text style={[styles.systemText, { color: MODE_COLOR[mode] }]}>
+            {CONNECTION_COPY[mode].label.toUpperCase()}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -130,16 +167,14 @@ const SOSScreen: React.FC = () => {
         </View>
 
         {/* LOCATION CARD */}
+        <Text style={styles.modeHint}>{CONNECTION_COPY[mode].detail}</Text>
+
         <View style={styles.locationCard}>
-          <View style={styles.mapPinContainer}>
-            <View style={styles.mapPinOuter}>
-              <View style={styles.mapPinInner} />
-            </View>
-          </View>
+          <LocationMap latitude={latitude} longitude={longitude} />
 
           <View style={styles.addressOverlay}>
             <View style={styles.addressIconBox}>
-              <Navigation size={20} color={colors.info} />
+              <Navigation size={20} color={colors.danger} />
             </View>
             <View style={styles.addressTextContent}>
               <Text style={styles.addressLabel}>YOUR LOCATION</Text>
@@ -207,6 +242,29 @@ const SOSScreen: React.FC = () => {
           <Text style={styles.sosInstructions}>Tap SOS to broadcast your location and crisis type</Text>
         </View>
 
+        {/* SOS SAVED ON THIS PHONE THAT HAVEN'T REACHED THE CONTROL ROOM */}
+        {unsent.map(item => {
+          const outcome = describeOutboxItem(item);
+          return (
+            <View key={item.clientId} style={[styles.statusCard, { borderLeftColor: outcome.color }]}>
+              <Text style={styles.statusCardLabel}>
+                {`SOS ON THIS PHONE · ${item.crisisType.toUpperCase()} · ${timeAgo(item.createdAt)}`}
+              </Text>
+              <Text style={[styles.statusCardTitle, { color: outcome.color }]}>{outcome.label}</Text>
+              <Text style={styles.statusCardDetail}>{outcome.detail}</Text>
+              {item.lastError ? <Text style={styles.statusCardError}>{item.lastError}</Text> : null}
+              <TouchableOpacity style={styles.retryBtn} onPress={handleRetry} disabled={retrying}>
+                {retrying ? (
+                  <ActivityIndicator size="small" color={colors.danger} />
+                ) : (
+                  <RefreshCw size={14} color={colors.danger} />
+                )}
+                <Text style={styles.retryText}>{retrying ? 'Trying…' : 'Try sending now'}</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+
         {/* LATEST SOS STATUS FROM THE CONTROL ROOM */}
         {latestSos && (() => {
           const status = describeSosStatus(latestSos);
@@ -259,6 +317,34 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 6,
   },
+  statusCardError: {
+    fontSize: 12,
+    color: colors.danger,
+    marginTop: 6,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: colors.dangerLight,
+  },
+  retryText: {
+    color: colors.danger,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  modeHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: -8,
+    marginBottom: 14,
+    lineHeight: 17,
+  },
   statusCardDetail: {
     fontSize: 13,
     color: colors.textSecondary,
@@ -283,7 +369,8 @@ const styles = StyleSheet.create({
   systemBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.dangerLight,
+    backgroundColor: colors.white,
+    borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
@@ -312,7 +399,7 @@ const styles = StyleSheet.create({
   statusLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: colors.info,
+    color: colors.danger,
     letterSpacing: 0.5,
   },
   mainHeading: {
@@ -321,34 +408,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   locationCard: {
-    height: 140,
     marginBottom: 25,
-    backgroundColor: colors.infoLight,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapPinContainer: {
-    marginBottom: 10,
-  },
-  mapPinOuter: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(198, 40, 40, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapPinInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.danger,
-    borderWidth: 2,
-    borderColor: colors.white,
   },
   addressOverlay: {
-    width: '90%',
+    marginTop: -28,
+    marginHorizontal: 12,
     backgroundColor: colors.white,
     borderRadius: 15,
     padding: 12,
@@ -360,7 +424,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: colors.infoLight,
+    backgroundColor: colors.dangerLight,
     justifyContent: 'center',
     alignItems: 'center',
   },

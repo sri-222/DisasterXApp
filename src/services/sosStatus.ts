@@ -1,5 +1,6 @@
 import { colors } from '../theme';
 import type { SosReport } from '../screens/api';
+import type { OutboxItem } from './sosOutbox';
 
 // How an SOS's control-room status reads to the person who sent it.
 const STATUS_COPY: Record<string, { label: string; detail: string; color: string }> = {
@@ -55,4 +56,32 @@ export function timeAgo(iso: string | null | undefined) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+// How an SOS that is still on this phone reads. Each label says only what is
+// actually known: the LoRa gateway gives no receipt, so "handed to the
+// gateway" never claims that anyone received it.
+export function describeOutboxItem(item: Pick<OutboxItem, 'state'>) {
+  switch (item.state) {
+    case 'server_accepted':
+      return {
+        label: 'SOS received by DisasterX',
+        detail: 'The control room has your alert. This screen shows when they respond.',
+        color: colors.danger,
+      };
+    case 'gateway_accepted':
+      return {
+        label: 'Sent to the offline gateway',
+        detail:
+          'The DisasterX gateway accepted your SOS and broadcast it over LoRa radio. The gateway cannot confirm that a rescue receiver heard it. It will also be sent to the control room as soon as the internet is back.',
+        color: colors.warning,
+      };
+    default:
+      return {
+        label: 'Saved on this phone',
+        detail:
+          'No internet and no DisasterX gateway right now. Your SOS is saved and will be sent automatically when either comes back. If you can, call 112.',
+        color: colors.textSecondary,
+      };
+  }
 }

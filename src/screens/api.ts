@@ -97,6 +97,11 @@ export interface SosPayload {
   latitude?: number;
   longitude?: number;
   address?: string;
+  // Makes the request idempotent: the backend returns the existing SOS
+  // instead of creating a second one when the same clientId comes again.
+  clientId?: string;
+  // 'lora' when the SOS already went out over the offline gateway first.
+  channel?: 'app' | 'lora';
 }
 
 // Set by the control room: active -> acknowledged -> dispatched -> resolved.
@@ -414,8 +419,35 @@ export async function getWeather(lat: number, lon: number): Promise<WeatherData>
   return result.data;
 }
 
-export async function submitSos(payload: SosPayload): Promise<{ success: boolean; id: string; createdAt: string }> {
-  return apiFetch(`/sos`, { method: 'POST', body: payload, auth: true });
+export async function submitSos(
+  payload: SosPayload,
+  options: { timeoutMs?: number } = {}
+): Promise<{ success: boolean; id: string; createdAt: string; duplicate?: boolean }> {
+  return apiFetch(`/sos`, { method: 'POST', body: payload, auth: true, timeoutMs: options.timeoutMs });
+}
+
+export async function registerPushToken(token: string, platform: 'android' | 'ios'): Promise<{ success: boolean }> {
+  return apiFetch(`/me/push-token`, { method: 'POST', body: { token, platform }, auth: true });
+}
+
+export async function unregisterPushToken(token: string): Promise<{ success: boolean }> {
+  return apiFetch(`/me/push-token`, { method: 'DELETE', body: { token }, auth: true });
+}
+
+// Asks the backend itself rather than trusting the phone's "connected" flag:
+// on the gateway's Wi-Fi Android reports a connection with no internet.
+const HEALTH_TIMEOUT_MS = 8000;
+export async function checkBackendHealth(): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const response = await fetch(buildUrl('/health'), { signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function getMySosHistory(): Promise<SosReport[]> {

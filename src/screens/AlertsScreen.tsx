@@ -11,7 +11,7 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MapPin, ArrowRight, TrendingUp, Globe2, Megaphone } from 'lucide-react-native';
+import { MapPin, ArrowRight, TrendingUp, Globe2, Megaphone, HelpCircle, ChevronDown, ChevronUp, WifiOff } from 'lucide-react-native';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
 import { describeQuakeFeed, getOfficialAlerts, getQuakes, LiveAlertEvent, OfficialAlert, QuakeFeed } from './api';
@@ -19,6 +19,9 @@ import { timeAgo } from '../services/sosStatus';
 import BottomTabBar from '../component/BottomTabBar';
 import ErrorBoundary from '../component/ErrorBoundary';
 import { colors, radii, spacing } from '../theme';
+import GatewayInbox from '../component/GatewayInbox';
+import { quakeMeaning, severityGuide, SEVERITY_GUIDE, Severity } from '../services/alertGuide';
+import { withOfflineCache } from '../services/offlineCache';
 
 const SEVERITY_COLOR: Record<LiveAlertEvent['severity'], string> = {
   Danger: colors.danger,
@@ -49,6 +52,7 @@ const SituationAlert = ({ event }: { event: LiveAlertEvent }) => {
         <Text style={styles.alertDescription} numberOfLines={2}>
           {event.detail}
         </Text>
+        <Text style={styles.meaningText}>{quakeMeaning(event.magnitude)}</Text>
 
         <View style={styles.alertFooter}>
           <View style={styles.locationContainer}>
@@ -79,6 +83,7 @@ const OfficialAlertCard = ({ alert }: { alert: OfficialAlert }) => {
         </View>
         <Text style={styles.alertTitle}>{alert.title}</Text>
         <Text style={styles.alertDescription}>{alert.message}</Text>
+        <Text style={[styles.actionText, { color }]}>{severityGuide(alert.severity).action}</Text>
         {alert.location && alert.location !== 'Unknown' ? (
           <View style={styles.alertFooter}>
             <View style={styles.locationContainer}>
@@ -90,6 +95,54 @@ const OfficialAlertCard = ({ alert }: { alert: OfficialAlert }) => {
           </View>
         ) : null}
       </View>
+    </View>
+  );
+};
+
+// Explains, in plain words, where alerts come from and what each colour means.
+const HowToRead = () => {
+  const [open, setOpen] = useState(false);
+  const Chevron = open ? ChevronUp : ChevronDown;
+  return (
+    <View style={styles.guideCard}>
+      <TouchableOpacity style={styles.guideHeader} onPress={() => setOpen(!open)} activeOpacity={0.8}>
+        <HelpCircle size={18} color={colors.textPrimary} />
+        <Text style={styles.guideTitle}>How to read this page</Text>
+        <Chevron size={18} color={colors.textMuted} />
+      </TouchableOpacity>
+      {open && (
+        <>
+          <Text style={styles.guideHeading}>Where alerts come from</Text>
+          <Text style={styles.guideLine}>
+            <Text style={styles.guideBold}>From authorities: </Text>
+            warnings published by the DisasterX control room, and automatic alerts from our flood and water-level
+            sensors.
+          </Text>
+          <Text style={styles.guideLine}>
+            <Text style={styles.guideBold}>Earthquakes: </Text>
+            official readings from the US Geological Survey (USGS) near your location. Tap one for the full report.
+          </Text>
+          <Text style={styles.guideLine}>
+            <Text style={styles.guideBold}>Radio messages: </Text>
+            SOS calls heard by the DisasterX offline gateway over LoRa radio, shown when you are on its Wi-Fi.
+          </Text>
+          <Text style={styles.guideHeading}>What the colours mean</Text>
+          {(Object.keys(SEVERITY_GUIDE) as Severity[]).map(level => (
+            <View key={level} style={styles.legendRow}>
+              <View style={[styles.legendDot, { backgroundColor: SEVERITY_COLOR[level] }]} />
+              <Text style={styles.legendText}>
+                <Text style={[styles.guideBold, { color: SEVERITY_COLOR[level] }]}>{`${level}: `}</Text>
+                {`${SEVERITY_GUIDE[level].meaning} ${SEVERITY_GUIDE[level].action}`}
+              </Text>
+            </View>
+          ))}
+          <Text style={styles.guideHeading}>Notifications</Text>
+          <Text style={styles.guideLine}>
+            Allow notifications and new official alerts reach you even when the app is closed. In danger, use the SOS
+            tab or call 112.
+          </Text>
+        </>
+      )}
     </View>
   );
 };
@@ -113,6 +166,8 @@ const AlertsScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the internet is down and we are showing the last saved copy.
+  const [savedAt, setSavedAt] = useState<string | null>(null);
 
   const permissionBannerActive =
     isPermissionDenied || locationError?.toLowerCase().includes('permission');
@@ -123,13 +178,18 @@ const AlertsScreen: React.FC = () => {
     setError(null);
     // Load both feeds independently: one failing must not hide the other.
     const [quakes, official] = await Promise.allSettled([
-      getQuakes(12, latitude, longitude),
-      getOfficialAlerts(),
+      withOfflineCache('quakes', () => getQuakes(12, latitude, longitude)),
+      withOfflineCache('official_alerts', () => getOfficialAlerts()),
     ]);
-    if (official.status === 'fulfilled') setOfficialAlerts(official.value);
+    if (official.status === 'fulfilled') setOfficialAlerts(official.value.data);
+    const stale = [quakes, official]
+      .map(result => (result.status === 'fulfilled' ? result.value.savedAt : null))
+      .filter((at): at is string => !!at)
+      .sort()[0];
+    setSavedAt(stale ?? null);
     if (quakes.status === 'fulfilled') {
-      setAlerts(quakes.value.events);
-      setQuakeScope(quakes.value);
+      setAlerts(quakes.value.data.events);
+      setQuakeScope(quakes.value.data);
     } else {
       setError(quakes.reason?.message || 'Unable to load live alerts right now.');
     }
@@ -140,8 +200,8 @@ const AlertsScreen: React.FC = () => {
   useEffect(() => {
     loadAlerts();
     const timer = setInterval(() => {
-      getOfficialAlerts()
-        .then(setOfficialAlerts)
+      withOfflineCache('official_alerts', () => getOfficialAlerts())
+        .then(result => setOfficialAlerts(result.data))
         .catch(() => {});
     }, REFRESH_MS);
     return () => clearInterval(timer);
@@ -189,9 +249,21 @@ const AlertsScreen: React.FC = () => {
               <View style={styles.dot} />
               <Text style={styles.criticalText}>{criticalCount} CRITICAL</Text>
             </View>
-            <Text style={styles.lastUpdated}>Authorities and USGS live feeds</Text>
+            <Text style={styles.lastUpdated}>From authorities, sensors and USGS</Text>
           </View>
         </View>
+
+        {savedAt && (
+          <View style={styles.offlineBanner}>
+            <WifiOff size={16} color={colors.warning} />
+            <Text style={styles.offlineText}>
+              {`No internet. Showing alerts saved ${timeAgo(savedAt) || 'earlier'}. Pull down to try again.`}
+            </Text>
+          </View>
+        )}
+
+        <HowToRead />
+        <GatewayInbox />
 
         {officialAlerts.length > 0 && (
           <>
@@ -243,7 +315,7 @@ const AlertsScreen: React.FC = () => {
         {alerts.length > 0 && (
           <View style={styles.vitalityCard}>
             <View style={styles.vitalityHeader}>
-              <Text style={styles.vitalityTitle}>REGIONAL VITALITY</Text>
+              <Text style={styles.vitalityTitle}>EARTHQUAKE SUMMARY</Text>
               <TrendingUp size={20} color={colors.danger} />
             </View>
             <View style={styles.statsGrid}>
@@ -450,6 +522,53 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     flexShrink: 1,
   },
+  meaningText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  actionText: {
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: -6,
+    marginBottom: 12,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.warningLight,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  offlineText: { flex: 1, fontSize: 12, color: colors.textSecondary },
+  guideCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  guideHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  guideTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: colors.textPrimary },
+  guideHeading: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: colors.textMuted,
+    marginTop: spacing.lg,
+    marginBottom: spacing.xs,
+    textTransform: 'uppercase',
+  },
+  guideLine: { fontSize: 13, color: colors.textSecondary, lineHeight: 19, marginTop: spacing.xs },
+  guideBold: { fontWeight: '800', color: colors.textPrimary },
+  legendRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: spacing.xs },
+  legendDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
+  legendText: { flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
   vitalityCard: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: 24,

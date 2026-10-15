@@ -11,6 +11,7 @@ const TEST_SAFE_AREA_METRICS = {
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn() }),
+  useFocusEffect: () => {},
 }));
 
 jest.mock('../LocationContext', () => ({

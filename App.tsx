@@ -8,6 +8,8 @@ import AppNavigator from './src/navigator/AppNavigator';
 import { LocationProvider } from './src/screens/LocationContext';
 import { navigationRef, resetToLogin } from './src/navigator/navigationRef';
 import { subscribe } from './src/services/authSession';
+import { ConnectionProvider } from './src/services/ConnectionContext';
+import { startPushNotifications } from './src/services/pushNotifications';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -28,6 +30,10 @@ function App() {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    startPushNotifications();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar
@@ -38,9 +44,11 @@ function App() {
 
       {/* NavigationContainer must wrap the AppNavigator */}
       <LocationProvider>
-        <NavigationContainer ref={navigationRef}>
-          <AppNavigator />
-        </NavigationContainer>
+        <ConnectionProvider>
+          <NavigationContainer ref={navigationRef}>
+            <AppNavigator />
+          </NavigationContainer>
+        </ConnectionProvider>
       </LocationProvider>
 
     </SafeAreaProvider>

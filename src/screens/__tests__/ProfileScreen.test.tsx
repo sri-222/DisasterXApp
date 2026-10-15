@@ -14,6 +14,10 @@ const TEST_SAFE_AREA_METRICS = {
 };
 
 const mockReset = jest.fn();
+jest.mock('../../services/pushNotifications', () => ({
+  stopPersonalNotifications: jest.fn(() => Promise.resolve()),
+}));
+
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ reset: mockReset }),
 }));

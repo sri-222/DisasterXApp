@@ -15,3 +15,17 @@ jest.mock('@react-native-community/geolocation', () => ({
     setRNConfiguration: jest.fn(),
   },
 }));
+
+// Firebase Messaging is native; under Jest it does nothing.
+jest.mock('@react-native-firebase/messaging', () => ({
+  __esModule: true,
+  getMessaging: jest.fn(() => ({})),
+  getToken: jest.fn(() => Promise.resolve('test-fcm-token')),
+  getInitialNotification: jest.fn(() => Promise.resolve(null)),
+  onMessage: jest.fn(() => () => {}),
+  onNotificationOpenedApp: jest.fn(() => () => {}),
+  onTokenRefresh: jest.fn(() => () => {}),
+  requestPermission: jest.fn(() => Promise.resolve(1)),
+  subscribeToTopic: jest.fn(() => Promise.resolve()),
+  setBackgroundMessageHandler: jest.fn(),
+}));
