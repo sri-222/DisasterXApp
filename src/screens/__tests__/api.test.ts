@@ -178,6 +178,14 @@ describe('restoreSession', () => {
     await expect(authSession.getToken()).resolves.toBeNull();
   });
 
+  test('keeps the token when the server is unreachable, so a cold start does not log the user out', async () => {
+    await authSession.saveToken('good-token');
+    global.fetch = jest.fn(() => Promise.reject(new Error('Network request failed'))) as any;
+
+    await expect(restoreSession()).rejects.toThrow(/No internet connection/);
+    await expect(authSession.getToken()).resolves.toBe('good-token');
+  });
+
   test('concurrent calls at startup share one in-flight check instead of racing', async () => {
     await authSession.saveToken('good-token');
     const profile = { id: '1', name: 'Ada', email: 'a@b.com', phone: null, role: 'responder', status: 'active' };
@@ -227,5 +235,30 @@ describe('control room data', () => {
     const [first] = await getMySosHistory();
     expect(first.status).toBe('dispatched');
     expect(first.assignedTeam).toBe('NDRF Team 4');
+  });
+});
+
+describe('login input', () => {
+  test('trims and lowercases the email before sending it', async () => {
+    global.fetch = jest.fn(() => jsonResponse(200, { success: true })) as any;
+    await login({ email: '  Sri@Example.com ', password: 'password123' });
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(JSON.parse(options.body).email).toBe('sri@example.com');
+  });
+});
+
+describe('request timeout', () => {
+  test('a request that never answers fails with a clear message instead of hanging', async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn(
+      (_url: string, options: any) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(new Error('Aborted')));
+        }),
+    ) as any;
+    const pending = getOfficialAlerts();
+    jest.advanceTimersByTime(60_000);
+    await expect(pending).rejects.toThrow(/taking too long/);
+    jest.useRealTimers();
   });
 });

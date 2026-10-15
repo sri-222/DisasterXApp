@@ -47,6 +47,24 @@ const RegisterScreen: React.FC = () => {
       setErrorMessage('Please fill out every required field.');
       return;
     }
+    // Mirror the backend's signup rules so people see a plain message, not
+    // a raw validation error.
+    if (name.trim().length < 2) {
+      setErrorMessage('Please enter your full name.');
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+    if (phone.trim() && phone.trim().length < 7) {
+      setErrorMessage('Please enter a valid phone number, or leave it empty.');
+      return;
+    }
+    if (password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters.');
+      return;
+    }
     if (password !== confirmPassword) {
       setErrorMessage('Passwords do not match.');
       return;
@@ -57,8 +75,8 @@ const RegisterScreen: React.FC = () => {
 
     try {
       await signup({
-        name,
-        phone,
+        name: name.trim(),
+        phone: phone.trim(),
         email,
         password,
         role: 'responder',
@@ -76,7 +94,7 @@ const RegisterScreen: React.FC = () => {
       setConfirmPassword('');
 
       Alert.alert('Success', 'Account created. Please log in.', [
-        { text: 'OK', onPress: () => navigation.navigate('Login') },
+        { text: 'OK', onPress: () => navigation.navigate('Login', undefined, { pop: true }) },
       ]);
     } catch (err: any) {
       setErrorMessage(err.message || 'Unable to register');
@@ -108,7 +126,7 @@ const RegisterScreen: React.FC = () => {
 
           <Card>
             <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Enter your details to register as a responder.</Text>
+            <Text style={styles.subtitle}>Create your account to send SOS alerts and get help fast.</Text>
 
             <TextField
               label="FULL NAME"
@@ -182,7 +200,7 @@ const RegisterScreen: React.FC = () => {
               icon={<ArrowRight color={colors.white} size={18} style={styles.btnIcon} />}
             />
 
-            <TouchableOpacity style={styles.loginLink} onPress={() => navigation.navigate('Login')}>
+            <TouchableOpacity style={styles.loginLink} onPress={() => navigation.navigate('Login', undefined, { pop: true })}>
               <Text style={styles.footerText}>
                 Already have an account? <Text style={styles.loginText}>Log in</Text>
               </Text>

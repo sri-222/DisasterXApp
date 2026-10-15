@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  Settings,
   Mail,
   Phone,
   HandHelping,
@@ -21,7 +20,6 @@ import {
   Clock,
   Target,
   Bandage,
-  Edit2,
   Utensils,
   Pill,
   Home as HomeIcon,
@@ -91,6 +89,7 @@ const ProfileScreen: React.FC = () => {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [myRequests, setMyRequests] = useState<HelpRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
+  const [requestsError, setRequestsError] = useState<string | null>(null);
   const [sosCount, setSosCount] = useState<number | null>(null);
   const [isTogglingVolunteer, setIsTogglingVolunteer] = useState(false);
 
@@ -117,8 +116,8 @@ const ProfileScreen: React.FC = () => {
       .then(data => {
         if (!cancelled) setMyRequests(data);
       })
-      .catch(() => {
-        if (!cancelled) setMyRequests([]);
+      .catch(err => {
+        if (!cancelled) setRequestsError(err.message || 'Unable to load your requests.');
       })
       .finally(() => {
         if (!cancelled) setRequestsLoading(false);
@@ -191,9 +190,6 @@ const ProfileScreen: React.FC = () => {
       {/* HEADER */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
-        <TouchableOpacity style={styles.settingsBtn}>
-          <Settings size={22} color={colors.textSecondary} />
-        </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -207,12 +203,9 @@ const ProfileScreen: React.FC = () => {
                 <View style={styles.avatar}>
                   <Text style={styles.avatarInitials}>{initials(profile?.name || '?')}</Text>
                 </View>
-                <TouchableOpacity style={styles.editBadge}>
-                  <Edit2 size={12} color={colors.white} />
-                </TouchableOpacity>
               </View>
 
-              <Text style={styles.userName}>{profile?.name || 'Unknown Responder'}</Text>
+              <Text style={styles.userName}>{profile?.name || 'DisasterX member'}</Text>
 
               {profileError ? (
                 <Text style={styles.profileErrorText}>{profileError}</Text>
@@ -230,7 +223,7 @@ const ProfileScreen: React.FC = () => {
                   <View style={styles.verifiedBadge}>
                     <View style={styles.dot} />
                     <Text style={styles.verifiedText}>
-                      {(profile?.role || 'RESPONDER').toUpperCase()}
+                      {profile?.role === 'volunteer' || profile?.volunteerStatus === 'active' ? 'VOLUNTEER' : 'CITIZEN'}
                     </Text>
                   </View>
                   <Text style={styles.memberSince}>{formatMemberSince(profile?.createdAt)}</Text>
@@ -311,7 +304,11 @@ const ProfileScreen: React.FC = () => {
           <ActivityIndicator color={colors.danger} style={styles.requestsLoadingIndicator} />
         )}
 
-        {!requestsLoading && myRequests.length === 0 && (
+        {!requestsLoading && requestsError && (
+          <Text style={styles.noRequestsText}>{requestsError}</Text>
+        )}
+
+        {!requestsLoading && !requestsError && myRequests.length === 0 && (
           <Text style={styles.noRequestsText}>
             You haven't submitted any assistance requests yet.
           </Text>
@@ -391,9 +388,6 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
   },
-  settingsBtn: {
-    padding: spacing.xs + 1,
-  },
   scrollContent: {
     padding: spacing.xl,
     paddingBottom: 110,
@@ -427,16 +421,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: spacing.sm,
     textAlign: 'center',
-  },
-  editBadge: {
-    position: 'absolute',
-    bottom: -5,
-    right: -5,
-    backgroundColor: colors.danger,
-    padding: spacing.sm,
-    borderRadius: 15,
-    borderWidth: 3,
-    borderColor: colors.white,
   },
   userName: {
     fontSize: 28,

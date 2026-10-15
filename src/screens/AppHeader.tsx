@@ -34,7 +34,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
   const isDark = variant === 'dark';
 
   const handleProfilePress = () => {
-    navigation.navigate('Profile');
+    navigation.navigate('Profile', undefined, { pop: true });
   };
 
   const handleBackPress = () => {

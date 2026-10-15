@@ -14,7 +14,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Navigation,
-  Battery,
   Waves,
   Flame,
   PlusSquare,
@@ -25,7 +24,7 @@ import {
 } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import BottomTabBar from '../component/BottomTabBar';
-import { useLocation } from './LocationContext';
+import { useLocation, usableAddress } from './LocationContext';
 import { submitSos, getMySosHistory, CrisisType, SosReport } from './api';
 import { colors } from '../theme';
 import { describeSosStatus, timeAgo } from '../services/sosStatus';
@@ -52,7 +51,7 @@ const CrisisItem = ({ title, desc, icon: Icon, selected, onPress }: any) => (
 const SOSScreen: React.FC = () => {
   const [selectedCrisis, setSelectedCrisis] = useState<CrisisType>('Flood');
   const [submitting, setSubmitting] = useState(false);
-  const { currentLocation, latitude, longitude } = useLocation();
+  const { currentLocation, latitude, longitude, fetchLocation } = useLocation();
   const [latestSos, setLatestSos] = useState<SosReport | null>(null);
 
   const refreshLatestSos = useCallback(() => {
@@ -73,15 +72,23 @@ const SOSScreen: React.FC = () => {
     if (submitting) return;
     setSubmitting(true);
     try {
+      // Try once for a GPS fix if we don't have one yet, but never hold the
+      // SOS back because of location.
+      let coords = latitude != null && longitude != null ? { latitude, longitude } : null;
+      if (!coords) {
+        coords = await fetchLocation().catch(() => null);
+      }
       await submitSos({
         crisisType: selectedCrisis,
-        latitude: latitude ?? undefined,
-        longitude: longitude ?? undefined,
-        address: currentLocation ?? undefined,
+        latitude: coords?.latitude,
+        longitude: coords?.longitude,
+        address: coords ? usableAddress(currentLocation) : undefined,
       });
       Alert.alert(
         'SOS Sent',
-        'Your emergency alert has been submitted with your current location. You will see here when a rescue team is on the way.'
+        coords
+          ? 'Your emergency alert was sent with your location. This screen shows when a rescue team is on the way.'
+          : 'Your emergency alert was sent, but your location could not be found. Turn on location, or call for help directly below.'
       );
       refreshLatestSos();
     } catch (err: any) {
@@ -119,13 +126,6 @@ const SOSScreen: React.FC = () => {
           <View>
             <Text style={styles.statusLabel}>YOUR CURRENT STATUS</Text>
             <Text style={styles.mainHeading}>Emergency Hub</Text>
-          </View>
-          <View style={styles.batteryContainer}>
-            <Text style={styles.batteryLabel}>BATTERY</Text>
-            <View style={styles.batteryRow}>
-              <Battery size={16} color={colors.textPrimary} />
-              <Text style={styles.batteryValue}>Device</Text>
-            </View>
           </View>
         </View>
 
@@ -319,24 +319,6 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '800',
     color: colors.textPrimary,
-  },
-  batteryContainer: {
-    alignItems: 'flex-end',
-  },
-  batteryLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.textMuted,
-    marginBottom: 4,
-  },
-  batteryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  batteryValue: {
-    fontSize: 14,
-    fontWeight: '800',
-    marginLeft: 4,
   },
   locationCard: {
     height: 140,

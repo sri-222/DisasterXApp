@@ -8,6 +8,7 @@ import {
   StatusBar,
   ActivityIndicator,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MapPin, ArrowRight, TrendingUp, Globe2, Megaphone } from 'lucide-react-native';
@@ -29,7 +30,12 @@ const SEVERITY_COLOR: Record<LiveAlertEvent['severity'], string> = {
 const SituationAlert = ({ event }: { event: LiveAlertEvent }) => {
   const color = SEVERITY_COLOR[event.severity] ?? colors.info;
   return (
-    <TouchableOpacity activeOpacity={0.9} style={styles.alertCard}>
+    <TouchableOpacity
+      activeOpacity={0.9}
+      style={styles.alertCard}
+      onPress={() => event.url && Linking.openURL(event.url).catch(() => {})}
+      disabled={!event.url}
+    >
       <View style={[styles.severityBar, { backgroundColor: color }]} />
       <View style={styles.alertContent}>
         <View style={styles.alertHeaderRow}>

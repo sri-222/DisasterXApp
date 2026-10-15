@@ -189,7 +189,10 @@ export function buildUrl(path: string): string {
   return `${base}${normalizedPath}`;
 }
 
-class ApiError extends Error {
+// Long enough for a Render free-tier cold start (30-60 s).
+const REQUEST_TIMEOUT_MS = 60_000;
+
+export class ApiError extends Error {
   isAuthError: boolean;
   constructor(message: string, isAuthError = false) {
     super(message);
@@ -199,9 +202,9 @@ class ApiError extends Error {
 
 async function apiFetch<T>(
   path: string,
-  options: { method?: string; body?: unknown; auth?: boolean } = {}
+  options: { method?: string; body?: unknown; auth?: boolean; timeoutMs?: number } = {}
 ): Promise<T> {
-  const { method = 'GET', body, auth = false } = options;
+  const { method = 'GET', body, auth = false, timeoutMs = REQUEST_TIMEOUT_MS } = options;
   // Only declare a JSON content-type when there's actually a body - Fastify's
   // default JSON parser rejects Content-Type: application/json on a request
   // with no body at all (e.g. logout), which otherwise masks a real 400 as a
@@ -219,11 +222,26 @@ async function apiFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(buildUrl(path), {
-    method,
-    headers,
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  // fetch has no timeout of its own; without one a sleeping Render instance
+  // leaves screens spinning forever.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), {
+      method,
+      headers,
+      signal: controller.signal,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (err: any) {
+    if (controller.signal.aborted) {
+      throw new ApiError('The server is taking too long to respond. Please try again.');
+    }
+    throw new ApiError(err?.message === 'Network request failed' ? 'No internet connection. Please try again.' : err?.message || 'Request failed');
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (response.status === 401 && auth) {
     // The session is gone server-side (expired/invalidated) even though we
@@ -244,7 +262,7 @@ async function apiFetch<T>(
 export async function login(payload: { email: string; password: string }): Promise<LoginResponse> {
   return apiFetch<LoginResponse>('/auth/login', {
     method: 'POST',
-    body: { email: payload.email, password: payload.password },
+    body: { email: normalizeEmail(payload.email), password: payload.password },
   });
 }
 
@@ -253,7 +271,7 @@ export async function signup(payload: SignupPayload): Promise<SignupResponse> {
     method: 'POST',
     body: {
       name: payload.name,
-      email: payload.email,
+      email: normalizeEmail(payload.email),
       password: payload.password,
       ...(payload.phone ? { phone: payload.phone } : {}),
       role: payload.role,
@@ -286,11 +304,16 @@ export async function restoreSession(): Promise<UserProfile | null> {
       return null;
     }
     try {
-      const { user } = await getMe();
+      const { user } = await apiFetch<MeResponse>('/auth/me', { auth: true, timeoutMs: 15_000 });
       return user;
-    } catch {
-      await authSession.clearToken();
-      return null;
+    } catch (err) {
+      // Only a rejected session logs the user out. A slow or offline server
+      // must not: the caller keeps the token and carries on.
+      if (err instanceof ApiError && err.isAuthError) {
+        await authSession.clearToken();
+        return null;
+      }
+      throw err;
     }
   })();
 

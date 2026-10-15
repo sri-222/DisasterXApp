@@ -51,10 +51,16 @@ const SplashScreen: React.FC = () => {
     let cancelled = false;
     const minDelay = new Promise<void>(resolve => setTimeout(resolve, 1800));
 
-    Promise.all([minDelay, restoreSession()]).then(([, user]) => {
-      if (cancelled) return;
-      navigation.replace(user ? 'Home' : 'Login');
-    });
+    Promise.all([minDelay, restoreSession()])
+      .then(([, user]) => {
+        if (cancelled) return;
+        navigation.replace(user ? 'Home' : 'Login');
+      })
+      .catch(() => {
+        // Server unreachable but a token is stored: open the app anyway.
+        // A dead session still gets a 401 later, which sends the user to Login.
+        if (!cancelled) navigation.replace('Home');
+      });
 
     return () => {
       cancelled = true;
