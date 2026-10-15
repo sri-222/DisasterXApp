@@ -45,6 +45,7 @@ import {
 import { describeRequestStatus } from '../services/sosStatus';
 import { clearToken } from '../services/authSession';
 import { clearUserProfile } from '../services/userProfileStorage';
+import { stopPersonalNotifications } from '../services/pushNotifications';
 
 function initials(name: string): string {
   const trimmed = name.trim();
@@ -160,6 +161,9 @@ const ProfileScreen: React.FC = () => {
     setIsLoggingOut(true);
 
     let serverConfirmed = false;
+    // While the session is still valid, stop this phone getting this
+    // account's SOS updates.
+    await stopPersonalNotifications();
     try {
       await logout();
       serverConfirmed = true;

@@ -40,6 +40,14 @@ import {
   WeatherData,
 } from './api';
 import { colors } from '../theme';
+import { CONNECTION_COPY, useConnection } from '../services/ConnectionContext';
+
+const MODE_COLOR = {
+  checking: '#9E9E9E',
+  online: '#2E7D32',
+  gateway: '#EF6C00',
+  offline: '#C62828',
+};
 
 const SEVERITY_STYLE: Record<LiveAlertEvent['severity'], { color: string; bgColor: string }> = {
   Danger: { color: '#C62828', bgColor: '#FFEBEE' },
@@ -114,6 +122,7 @@ const HomeScreen = () => {
     isPermissionDenied,
     openLocationSettings,
   } = useLocation();
+  const connection = useConnection();
 
   const permissionBannerActive =
     isPermissionDenied || locationError?.toLowerCase().includes('permission');
@@ -225,10 +234,13 @@ const HomeScreen = () => {
               </View>
             </TouchableOpacity>
 
+            {/* Real state of the SOS route, not a fixed label. */}
             <View style={styles.monitoringBadge}>
-              <View style={styles.dot} />
+              <View style={[styles.dot, { backgroundColor: MODE_COLOR[connection.mode] }]} />
 
-              <Text style={styles.monitoringText}>LIVE MONITORING ACTIVE</Text>
+              <Text style={styles.monitoringText}>
+                {`SOS ROUTE: ${CONNECTION_COPY[connection.mode].label.toUpperCase()}`}
+              </Text>
             </View>
           </View>
 
