@@ -16,6 +16,7 @@ import { useLocation } from './LocationContext';
 import { getLiveAlerts, getOfficialAlerts, LiveAlertEvent, OfficialAlert } from './api';
 import { timeAgo } from '../services/sosStatus';
 import BottomTabBar from '../component/BottomTabBar';
+import ErrorBoundary from '../component/ErrorBoundary';
 import { colors, radii, spacing } from '../theme';
 
 const SEVERITY_COLOR: Record<LiveAlertEvent['severity'], string> = {
@@ -185,9 +186,11 @@ const AlertsScreen: React.FC = () => {
               <Megaphone size={16} color={colors.danger} />
               <Text style={styles.sectionHeaderText}>FROM AUTHORITIES</Text>
             </View>
-            {officialAlerts.map(alert => (
-              <OfficialAlertCard key={alert.id} alert={alert} />
-            ))}
+            <ErrorBoundary message="Could not show the official alerts.">
+              {officialAlerts.map(alert => (
+                <OfficialAlertCard key={alert.id} alert={alert} />
+              ))}
+            </ErrorBoundary>
             <View style={styles.sectionHeader}>
               <Globe2 size={16} color={colors.textMuted} />
               <Text style={styles.sectionHeaderText}>EARTHQUAKES WORLDWIDE</Text>
@@ -215,9 +218,11 @@ const AlertsScreen: React.FC = () => {
           </View>
         )}
 
-        {alerts.map(event => (
-          <SituationAlert key={event.id} event={event} />
-        ))}
+        <ErrorBoundary message="Could not show the earthquake feed.">
+          {alerts.map(event => (
+            <SituationAlert key={event.id} event={event} />
+          ))}
+        </ErrorBoundary>
 
         {alerts.length > 0 && (
           <View style={styles.vitalityCard}>

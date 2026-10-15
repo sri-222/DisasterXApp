@@ -1,4 +1,4 @@
-import { describeRequestStatus, describeSosStatus } from '../sosStatus';
+import { describeRequestStatus, describeSosStatus, timeAgo } from '../sosStatus';
 
 describe('describeSosStatus', () => {
   it('names the dispatched team when the control room set one', () => {
@@ -22,5 +22,12 @@ describe('describeRequestStatus', () => {
   it('turns backend statuses into readable labels', () => {
     expect(describeRequestStatus('in_progress')).toBe('Being handled');
     expect(describeRequestStatus('fulfilled')).toBe('Fulfilled');
+  });
+});
+
+describe('timeAgo', () => {
+  it('returns an empty string for a timestamp that is not a date', () => {
+    expect(timeAgo('not a date')).toBe('');
+    expect(timeAgo(undefined)).toBe('');
   });
 });
