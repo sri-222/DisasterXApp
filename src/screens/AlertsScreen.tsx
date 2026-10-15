@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MapPin, ArrowRight, TrendingUp, Globe2, Megaphone } from 'lucide-react-native';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
-import { getLiveAlerts, getOfficialAlerts, LiveAlertEvent, OfficialAlert } from './api';
+import { describeQuakeFeed, getOfficialAlerts, getQuakes, LiveAlertEvent, OfficialAlert, QuakeFeed } from './api';
 import { timeAgo } from '../services/sosStatus';
 import BottomTabBar from '../component/BottomTabBar';
 import ErrorBoundary from '../component/ErrorBoundary';
@@ -99,6 +99,8 @@ const REFRESH_MS = 30_000;
 
 const AlertsScreen: React.FC = () => {
   const {
+    latitude,
+    longitude,
     locationError,
     isPermissionDenied,
     fetchLocation,
@@ -107,6 +109,7 @@ const AlertsScreen: React.FC = () => {
 
   const [alerts, setAlerts] = useState<LiveAlertEvent[]>([]);
   const [officialAlerts, setOfficialAlerts] = useState<OfficialAlert[]>([]);
+  const [quakeScope, setQuakeScope] = useState<Pick<QuakeFeed, 'scope' | 'radiusKm' | 'days'> | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,16 +122,20 @@ const AlertsScreen: React.FC = () => {
     else setLoading(true);
     setError(null);
     // Load both feeds independently: one failing must not hide the other.
-    const [quakes, official] = await Promise.allSettled([getLiveAlerts(12), getOfficialAlerts()]);
+    const [quakes, official] = await Promise.allSettled([
+      getQuakes(12, latitude, longitude),
+      getOfficialAlerts(),
+    ]);
     if (official.status === 'fulfilled') setOfficialAlerts(official.value);
     if (quakes.status === 'fulfilled') {
-      setAlerts(quakes.value);
+      setAlerts(quakes.value.events);
+      setQuakeScope(quakes.value);
     } else {
       setError(quakes.reason?.message || 'Unable to load live alerts right now.');
     }
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [latitude, longitude]);
 
   useEffect(() => {
     loadAlerts();
@@ -197,11 +204,14 @@ const AlertsScreen: React.FC = () => {
                 <OfficialAlertCard key={alert.id} alert={alert} />
               ))}
             </ErrorBoundary>
-            <View style={styles.sectionHeader}>
-              <Globe2 size={16} color={colors.textMuted} />
-              <Text style={styles.sectionHeaderText}>EARTHQUAKES WORLDWIDE</Text>
-            </View>
           </>
+        )}
+
+        {quakeScope && (
+          <View style={styles.sectionHeader}>
+            <Globe2 size={16} color={colors.textMuted} />
+            <Text style={styles.sectionHeaderText}>{describeQuakeFeed(quakeScope).toUpperCase()}</Text>
+          </View>
         )}
 
         {loading && (

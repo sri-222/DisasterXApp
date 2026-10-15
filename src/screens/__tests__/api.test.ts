@@ -10,6 +10,8 @@ import {
   restoreSession,
   getOfficialAlerts,
   getMySosHistory,
+  getQuakes,
+  describeQuakeFeed,
 } from '../api';
 import * as authSession from '../../services/authSession';
 
@@ -260,5 +262,28 @@ describe('request timeout', () => {
     jest.advanceTimersByTime(60_000);
     await expect(pending).rejects.toThrow(/taking too long/);
     jest.useRealTimers();
+  });
+});
+
+describe('earthquake feed', () => {
+  test('asks for quakes near the user and reports the nearby scope', async () => {
+    global.fetch = jest.fn(() =>
+      jsonResponse(200, { success: true, scope: 'nearby', radiusKm: 1000, days: 30, data: [{ id: 'q1', distanceKm: 420 }] }),
+    ) as any;
+    const feed = await getQuakes(5, 13.0827, 80.2707);
+    const [url] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/alerts/live?limit=5&lat=13.083&lon=80.271`);
+    expect(feed.scope).toBe('nearby');
+    expect(feed.events[0].distanceKm).toBe(420);
+    expect(describeQuakeFeed(feed)).toBe('Earthquakes within 1000 km of you, last 30 days');
+  });
+
+  test('without a location, or from an older backend, the feed is worldwide', async () => {
+    global.fetch = jest.fn(() => jsonResponse(200, { success: true, data: [] })) as any;
+    const feed = await getQuakes(5);
+    const [url] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/alerts/live?limit=5`);
+    expect(feed.scope).toBe('worldwide');
+    expect(describeQuakeFeed(feed)).toBe('Largest earthquakes worldwide today');
   });
 });
