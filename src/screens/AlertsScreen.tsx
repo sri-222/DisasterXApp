@@ -10,10 +10,11 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MapPin, ArrowRight, TrendingUp, Globe2 } from 'lucide-react-native';
+import { MapPin, ArrowRight, TrendingUp, Globe2, Megaphone } from 'lucide-react-native';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
-import { getLiveAlerts, LiveAlertEvent } from './api';
+import { getLiveAlerts, getOfficialAlerts, LiveAlertEvent, OfficialAlert } from './api';
+import { timeAgo } from '../services/sosStatus';
 import BottomTabBar from '../component/BottomTabBar';
 import { colors, radii, spacing } from '../theme';
 
@@ -56,6 +57,39 @@ const SituationAlert = ({ event }: { event: LiveAlertEvent }) => {
   );
 };
 
+// Official alerts are broadcast by authorities from the control room.
+const OfficialAlertCard = ({ alert }: { alert: OfficialAlert }) => {
+  const color = SEVERITY_COLOR[alert.severity] ?? colors.info;
+  return (
+    <View style={[styles.alertCard, styles.officialCard]}>
+      <View style={[styles.severityBar, { backgroundColor: color }]} />
+      <View style={styles.alertContent}>
+        <View style={styles.alertHeaderRow}>
+          <View style={[styles.severityBadge, { backgroundColor: `${color}15` }]}>
+            <Text style={[styles.severityText, { color }]}>{`OFFICIAL · ${alert.severity.toUpperCase()}`}</Text>
+          </View>
+          <Text style={styles.timeText}>{timeAgo(alert.timestamp)}</Text>
+        </View>
+        <Text style={styles.alertTitle}>{alert.title}</Text>
+        <Text style={styles.alertDescription}>{alert.message}</Text>
+        {alert.location && alert.location !== 'Unknown' ? (
+          <View style={styles.alertFooter}>
+            <View style={styles.locationContainer}>
+              <MapPin size={14} color={colors.textMuted} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {alert.location}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
+// Re-check while the screen is open so a new broadcast shows up without a pull.
+const REFRESH_MS = 30_000;
+
 const AlertsScreen: React.FC = () => {
   const {
     locationError,
@@ -65,6 +99,7 @@ const AlertsScreen: React.FC = () => {
   } = useLocation();
 
   const [alerts, setAlerts] = useState<LiveAlertEvent[]>([]);
+  const [officialAlerts, setOfficialAlerts] = useState<OfficialAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,22 +111,31 @@ const AlertsScreen: React.FC = () => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
-    try {
-      const data = await getLiveAlerts(12);
-      setAlerts(data);
-    } catch (err: any) {
-      setError(err.message || 'Unable to load live alerts right now.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    // Load both feeds independently: one failing must not hide the other.
+    const [quakes, official] = await Promise.allSettled([getLiveAlerts(12), getOfficialAlerts()]);
+    if (official.status === 'fulfilled') setOfficialAlerts(official.value);
+    if (quakes.status === 'fulfilled') {
+      setAlerts(quakes.value);
+    } else {
+      setError(quakes.reason?.message || 'Unable to load live alerts right now.');
     }
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
   useEffect(() => {
     loadAlerts();
+    const timer = setInterval(() => {
+      getOfficialAlerts()
+        .then(setOfficialAlerts)
+        .catch(() => {});
+    }, REFRESH_MS);
+    return () => clearInterval(timer);
   }, [loadAlerts]);
 
-  const criticalCount = alerts.filter(a => a.severity === 'Danger').length;
+  const criticalCount =
+    alerts.filter(a => a.severity === 'Danger').length +
+    officialAlerts.filter(a => a.severity === 'Danger').length;
   const largestMagnitude = alerts.reduce((max, a) => Math.max(max, a.magnitude), 0);
 
   return (
@@ -131,9 +175,25 @@ const AlertsScreen: React.FC = () => {
               <View style={styles.dot} />
               <Text style={styles.criticalText}>{criticalCount} CRITICAL</Text>
             </View>
-            <Text style={styles.lastUpdated}>Live from USGS earthquake feed</Text>
+            <Text style={styles.lastUpdated}>Authorities and USGS live feeds</Text>
           </View>
         </View>
+
+        {officialAlerts.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Megaphone size={16} color={colors.danger} />
+              <Text style={styles.sectionHeaderText}>FROM AUTHORITIES</Text>
+            </View>
+            {officialAlerts.map(alert => (
+              <OfficialAlertCard key={alert.id} alert={alert} />
+            ))}
+            <View style={styles.sectionHeader}>
+              <Globe2 size={16} color={colors.textMuted} />
+              <Text style={styles.sectionHeaderText}>EARTHQUAKES WORLDWIDE</Text>
+            </View>
+          </>
+        )}
 
         {loading && (
           <View style={styles.centerState}>
@@ -283,6 +343,23 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 13,
     textAlign: 'center',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
+  sectionHeaderText: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: colors.textMuted,
+  },
+  officialCard: {
+    borderWidth: 1,
+    borderColor: colors.dangerLight,
   },
   alertCard: {
     backgroundColor: colors.surface,

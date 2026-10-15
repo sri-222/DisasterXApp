@@ -8,6 +8,8 @@ import {
   getMe,
   logout,
   restoreSession,
+  getOfficialAlerts,
+  getMySosHistory,
 } from '../api';
 import * as authSession from '../../services/authSession';
 
@@ -186,5 +188,25 @@ describe('restoreSession', () => {
     expect(a).toEqual(profile);
     expect(b).toEqual(profile);
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('control room data', () => {
+  it('getOfficialAlerts reads broadcast alerts without needing a login', async () => {
+    const alert = { id: 'a1', title: 'Flood warning', message: 'Move to higher ground', severity: 'Danger' };
+    global.fetch = jest.fn(() => jsonResponse(200, { success: true, data: [alert] })) as any;
+    await expect(getOfficialAlerts(5)).resolves.toEqual([alert]);
+    const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/alerts?limit=5`);
+    expect(options.headers?.Authorization).toBeUndefined();
+  });
+
+  it('getMySosHistory passes through the dispatch status and team', async () => {
+    await authSession.saveToken('tok');
+    const report = { id: 's1', crisisType: 'Flood', status: 'dispatched', assignedTeam: 'NDRF Team 4' };
+    global.fetch = jest.fn(() => jsonResponse(200, { success: true, data: [report] })) as any;
+    const [first] = await getMySosHistory();
+    expect(first.status).toBe('dispatched');
+    expect(first.assignedTeam).toBe('NDRF Team 4');
   });
 });
