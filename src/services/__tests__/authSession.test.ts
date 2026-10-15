@@ -47,7 +47,7 @@ describe('restored sessions', () => {
     jest.resetModules();
     const KeychainMock = require('react-native-keychain');
     KeychainMock.__reset();
-    await Keychain.setGenericPassword('disasterx', 'stored-token', { service: 'disasterx.auth.token' });
+    await KeychainMock.setGenericPassword('disasterx', 'stored-token', { service: 'disasterx.auth.token' });
     const session = require('../authSession');
     const seen: Array<string | null> = [];
     session.subscribe((token: string | null) => seen.push(token));
