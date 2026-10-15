@@ -63,6 +63,16 @@ export interface LiveAlertEvent {
   updated: string;
   isWater: boolean;
   type: string;
+  // Only on nearby results: how far the quake was from the user.
+  distanceKm?: number;
+}
+
+export interface QuakeFeed {
+  // nearby: quakes around the user's location; worldwide: largest quakes today.
+  scope: 'nearby' | 'worldwide';
+  radiusKm?: number;
+  days?: number;
+  events: LiveAlertEvent[];
 }
 
 export interface WeatherData {
@@ -325,10 +335,39 @@ export async function restoreSession(): Promise<UserProfile | null> {
 }
 
 export async function getLiveAlerts(limit = 6): Promise<LiveAlertEvent[]> {
-  const result = await apiFetch<{ success: boolean; data: LiveAlertEvent[] }>(
-    `/alerts/live?limit=${limit}`
-  );
-  return result.data;
+  return (await getQuakes(limit)).events;
+}
+
+// Earthquakes near the user when a location is known, otherwise worldwide.
+export async function getQuakes(
+  limit = 6,
+  latitude?: number | null,
+  longitude?: number | null,
+): Promise<QuakeFeed> {
+  const near =
+    latitude != null && longitude != null
+      ? `&lat=${latitude.toFixed(3)}&lon=${longitude.toFixed(3)}`
+      : '';
+  const result = await apiFetch<{
+    success: boolean;
+    scope?: QuakeFeed['scope'];
+    radiusKm?: number;
+    days?: number;
+    data: LiveAlertEvent[];
+  }>(`/alerts/live?limit=${limit}${near}`);
+  return {
+    // An older backend sends no scope: its feed is the worldwide one.
+    scope: result.scope === 'nearby' ? 'nearby' : 'worldwide',
+    radiusKm: result.radiusKm,
+    days: result.days,
+    events: Array.isArray(result.data) ? result.data : [],
+  };
+}
+
+export function describeQuakeFeed(feed: Pick<QuakeFeed, 'scope' | 'radiusKm' | 'days'>): string {
+  return feed.scope === 'nearby'
+    ? `Earthquakes within ${feed.radiusKm ?? 1000} km of you, last ${feed.days ?? 30} days`
+    : 'Largest earthquakes worldwide today';
 }
 
 const OFFICIAL_SEVERITIES: OfficialAlert['severity'][] = ['Danger', 'Warning', 'Info', 'Safe'];

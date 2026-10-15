@@ -30,7 +30,15 @@ import {
 import BottomTabBar from '../component/BottomTabBar';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
-import { getLiveAlerts, getOfficialAlerts, getWeather, LiveAlertEvent, OfficialAlert, WeatherData } from './api';
+import {
+  getOfficialAlerts,
+  getQuakes,
+  getWeather,
+  LiveAlertEvent,
+  OfficialAlert,
+  QuakeFeed,
+  WeatherData,
+} from './api';
 import { colors } from '../theme';
 
 const SEVERITY_STYLE: Record<LiveAlertEvent['severity'], { color: string; bgColor: string }> = {
@@ -114,6 +122,7 @@ const HomeScreen = () => {
   const [alerts, setAlerts] = useState<LiveAlertEvent[]>([]);
   const [officialAlerts, setOfficialAlerts] = useState<OfficialAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
+  const [quakeScope, setQuakeScope] = useState<Pick<QuakeFeed, 'scope' | 'radiusKm' | 'days'> | null>(null);
 
   useEffect(() => {
     if (latitude == null || longitude == null) return;
@@ -124,12 +133,15 @@ const HomeScreen = () => {
 
   useEffect(() => {
     // Official broadcasts from the control room come first on Home.
-    Promise.allSettled([getOfficialAlerts(2), getLiveAlerts(2)]).then(([official, quakes]) => {
+    Promise.allSettled([getOfficialAlerts(2), getQuakes(2, latitude, longitude)]).then(([official, quakes]) => {
       if (official.status === 'fulfilled') setOfficialAlerts(official.value);
-      if (quakes.status === 'fulfilled') setAlerts(quakes.value);
+      if (quakes.status === 'fulfilled') {
+        setAlerts(quakes.value.events);
+        setQuakeScope(quakes.value);
+      }
       setAlertsLoading(false);
     });
-  }, []);
+  }, [latitude, longitude]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -225,7 +237,9 @@ const HomeScreen = () => {
               <Text style={styles.sectionTitle}>Disaster Alerts</Text>
 
               <Text style={styles.sectionSubtitle}>
-                Official alerts and major earthquakes
+                {quakeScope?.scope === 'nearby'
+                  ? 'Official alerts and earthquakes near you'
+                  : 'Official alerts and major earthquakes'}
               </Text>
             </View>
           <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>

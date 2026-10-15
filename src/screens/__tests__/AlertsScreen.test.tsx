@@ -27,12 +27,12 @@ jest.mock('../api', () => {
   const actual = jest.requireActual('../api');
   return {
     ...actual,
-    getLiveAlerts: jest.fn(),
+    getQuakes: jest.fn(),
     getOfficialAlerts: jest.fn(),
   };
 });
 
-const { getLiveAlerts, getOfficialAlerts, normalizeOfficialAlert } = require('../api');
+const { getQuakes, getOfficialAlerts, normalizeOfficialAlert } = require('../api');
 
 function allText(renderer: ReactTestRenderer) {
   return renderer.root
@@ -52,7 +52,7 @@ describe('AlertsScreen', () => {
   });
 
   it('renders official alerts left by the old backend without crashing', async () => {
-    (getLiveAlerts as jest.Mock).mockResolvedValue([]);
+    (getQuakes as jest.Mock).mockResolvedValue({ scope: 'worldwide', events: [] });
     (getOfficialAlerts as jest.Mock).mockResolvedValue(
       [
         { message: 'High value detected for water sensor', severity: 'Danger', timestamp: { _seconds: 1760000000 } },
