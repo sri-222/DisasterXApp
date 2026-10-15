@@ -45,8 +45,8 @@ describe('authSession token storage', () => {
 describe('restored sessions', () => {
   test('loading a stored token notifies listeners, so a later 401 can send the user to Login', async () => {
     jest.resetModules();
-    const Keychain = require('react-native-keychain');
-    Keychain.__reset();
+    const KeychainMock = require('react-native-keychain');
+    KeychainMock.__reset();
     await Keychain.setGenericPassword('disasterx', 'stored-token', { service: 'disasterx.auth.token' });
     const session = require('../authSession');
     const seen: Array<string | null> = [];
