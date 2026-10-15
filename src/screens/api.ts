@@ -76,6 +76,8 @@ export interface WeatherData {
   sunrise: string | null;
   sunset: string | null;
   updatedAt: string;
+  // Which upstream answered: open-meteo, or met.no when Open-Meteo is rate limited.
+  source?: string;
 }
 
 export type CrisisType = 'Flood' | 'Fire' | 'Medical' | 'Earthquake' | 'Other';
