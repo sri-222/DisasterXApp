@@ -15,7 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ArrowLeft, Utensils, Pill, Home as HomeIcon, MoreHorizontal } from 'lucide-react-native';
 import { RootStackParamList } from '../navigator/types';
 import { ScreenContainer, Card, Button } from '../components/ui';
-import { useLocation } from './LocationContext';
+import { useLocation, usableAddress } from './LocationContext';
 import { createHelpRequest, HelpCategory } from './api';
 import { colors, radii, spacing, typography } from '../theme';
 
@@ -56,7 +56,7 @@ const RequestHelpScreen: React.FC = () => {
         urgent,
         latitude: latitude ?? undefined,
         longitude: longitude ?? undefined,
-        address: currentLocation ?? undefined,
+        address: latitude != null ? usableAddress(currentLocation) : undefined,
       });
       Alert.alert('Request Sent', 'Your assistance request has been submitted.', [
         { text: 'OK', onPress: () => navigation.goBack() },
@@ -74,7 +74,7 @@ const RequestHelpScreen: React.FC = () => {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <ArrowLeft size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Request {category} Assistance</Text>
+        <Text style={styles.headerTitle}>{category === 'Other' ? 'Request Assistance' : `Request ${category} Assistance`}</Text>
       </View>
 
       <KeyboardAvoidingView

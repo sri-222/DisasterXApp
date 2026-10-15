@@ -45,7 +45,9 @@ const VolunteerScreen: React.FC = () => {
   useEffect(() => {
     getMe()
       .then(res => setVolunteerStatus(res.user.volunteerStatus))
-      .catch(() => setVolunteerStatus(null));
+      // If the status can't load, still let them try to join; the join call
+      // reports its own error.
+      .catch(() => setVolunteerStatus('inactive'));
     getRequestsStats()
       .then(res => setOpenCount(res.openCount))
       .catch(() => setOpenCount(null));
@@ -79,7 +81,7 @@ const VolunteerScreen: React.FC = () => {
       {/* HEADER */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
-        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.navigate('Home')}>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.navigate('Home', undefined, { pop: true })}>
           <X size={24} color={colors.black} />
         </TouchableOpacity>
       </View>
@@ -99,7 +101,7 @@ const VolunteerScreen: React.FC = () => {
         </Text>
         
         <Text style={styles.heroSubtitle}>
-          Join our elite network of responders and logistics experts. Your skills can save lives during critical window periods.
+          Join local volunteers who help their community during disasters. Your skills can save lives.
         </Text>
 
         {/* HERO IMAGE WITH OVERLAY */}
@@ -123,7 +125,7 @@ const VolunteerScreen: React.FC = () => {
           disabled={toggling || volunteerStatus === null}
           activeOpacity={0.85}
         >
-          {toggling ? (
+          {toggling || volunteerStatus === null ? (
             <ActivityIndicator color={colors.white} />
           ) : (
             <Text style={styles.statusCtaText}>
@@ -168,7 +170,7 @@ const VolunteerScreen: React.FC = () => {
             <Text style={styles.noteTitle}>NOTE</Text>
           </View>
           <Text style={styles.noteDesc}>
-            Background checks are required for all "Critical Response" tiers. Ensure your ID is ready for the next step.
+            Once you join, the control room sees you as an available volunteer and can contact you when help is needed nearby.
           </Text>
         </View>
 

@@ -26,6 +26,9 @@ export async function getToken(): Promise<string | null> {
     console.warn('Unable to read auth token from secure storage:', err);
     cachedToken = null;
   }
+  // Let App know a session was restored from storage, so a later 401 on that
+  // restored token still sends the user back to Login.
+  notify(cachedToken);
   return cachedToken;
 }
 

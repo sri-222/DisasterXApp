@@ -41,3 +41,20 @@ describe('authSession token storage', () => {
     expect(seen).toEqual(['jwt-123', null]);
   });
 });
+
+describe('restored sessions', () => {
+  test('loading a stored token notifies listeners, so a later 401 can send the user to Login', async () => {
+    jest.resetModules();
+    const Keychain = require('react-native-keychain');
+    Keychain.__reset();
+    await Keychain.setGenericPassword('disasterx', 'stored-token', { service: 'disasterx.auth.token' });
+    const session = require('../authSession');
+    const seen: Array<string | null> = [];
+    session.subscribe((token: string | null) => seen.push(token));
+
+    await session.getToken();
+    await session.clearToken();
+
+    expect(seen).toEqual(['stored-token', null]);
+  });
+});

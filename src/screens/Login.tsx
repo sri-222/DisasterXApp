@@ -6,6 +6,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Linking,
   ScrollView,
   StyleSheet,
 } from 'react-native';
@@ -85,7 +86,7 @@ const SignInScreen: React.FC = () => {
             <Text style={styles.title}>Sign In</Text>
 
             <TextField
-              label="EMAIL OR PHONE"
+              label="EMAIL"
               placeholder="name@example.com"
               value={email}
               onChangeText={setEmail}
@@ -96,9 +97,6 @@ const SignInScreen: React.FC = () => {
 
             <View style={styles.passwordLabelRow}>
               <Text style={styles.passwordLabel}>PASSWORD</Text>
-              <TouchableOpacity>
-                <Text style={styles.forgotText}>FORGOT?</Text>
-              </TouchableOpacity>
             </View>
             <TextField
               placeholder="••••••••"
@@ -139,11 +137,12 @@ const SignInScreen: React.FC = () => {
           </Card>
 
           <View style={styles.footerLinksRow}>
-            <TouchableOpacity style={styles.footerLinkItem}>
-              <Text style={styles.footerLinkText}>HELP CENTER</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.footerLinkItem}>
-              <Text style={styles.footerLinkText}>EMERGENCY OFFLINE</Text>
+            {/* Works without an account: anyone can still reach emergency services. */}
+            <TouchableOpacity
+              style={styles.footerLinkItem}
+              onPress={() => Linking.openURL('tel:112').catch(() => {})}
+            >
+              <Text style={styles.footerLinkText}>EMERGENCY? CALL 112</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>

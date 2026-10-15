@@ -25,6 +25,14 @@ interface LocationContextType {
   openLocationSettings: () => Promise<void>;
 }
 
+// currentLocation doubles as a status line ("Permission Denied", "Location
+// Unavailable"); never send those to the control room as an address.
+const STATUS_TEXTS = ['Permission Denied', 'Location Unavailable', 'Fetching location...'];
+export function usableAddress(text: string | null | undefined): string | undefined {
+  if (!text || STATUS_TEXTS.includes(text)) return undefined;
+  return text;
+}
+
 const LocationContext = createContext<LocationContextType | undefined>(
   undefined,
 );

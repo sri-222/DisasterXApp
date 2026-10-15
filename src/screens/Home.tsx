@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -15,11 +16,12 @@ import {
   MapPin,
   ChevronRight,
   Radio,
-  Droplets,
-  Bandage,
+  Activity,
+  Hospital,
   Hotel,
+  Megaphone,
+  Siren,
   CloudSun,
-  History,
   Utensils,
   Pill,
   Home as HomeIcon,
@@ -28,7 +30,7 @@ import {
 import BottomTabBar from '../component/BottomTabBar';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
-import { getLiveAlerts, getWeather, LiveAlertEvent, WeatherData } from './api';
+import { getLiveAlerts, getOfficialAlerts, getWeather, LiveAlertEvent, OfficialAlert, WeatherData } from './api';
 import { colors } from '../theme';
 
 const SEVERITY_STYLE: Record<LiveAlertEvent['severity'], { color: string; bgColor: string }> = {
@@ -38,6 +40,17 @@ const SEVERITY_STYLE: Record<LiveAlertEvent['severity'], { color: string; bgColo
   Safe: { color: '#2E7D32', bgColor: '#E8F5E9' },
 };
 
+// Opens Google Maps searching for a kind of place near the user.
+function openNearby(query: string, latitude: number | null, longitude: number | null) {
+  const near = latitude != null && longitude != null ? `/@${latitude},${longitude},14z` : '';
+  Linking.openURL(`https://www.google.com/maps/search/${encodeURIComponent(query)}${near}`).catch(() => {});
+}
+
+function openPoint(lat?: number | null, lon?: number | null) {
+  if (lat == null || lon == null) return;
+  Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`).catch(() => {});
+}
+
 const AlertCard = ({
   type,
   title,
@@ -46,6 +59,7 @@ const AlertCard = ({
   color,
   bgColor,
   icon: Icon,
+  onMapPress,
 }: any) => (
   <View style={[styles.alertCard, { backgroundColor: bgColor }]}>
     <View style={styles.alertHeader}>
@@ -63,14 +77,23 @@ const AlertCard = ({
     <View style={styles.alertFooter}>
       <Text style={styles.updateText}>UPDATED {time}</Text>
 
-      <TouchableOpacity
-        style={[styles.smallMapBtn, { backgroundColor: color }]}
-      >
-        <MapPin size={12} color="#FFF" />
-      </TouchableOpacity>
+      {onMapPress && (
+        <TouchableOpacity
+          style={[styles.smallMapBtn, { backgroundColor: color }]}
+          onPress={onMapPress}
+        >
+          <MapPin size={12} color="#FFF" />
+        </TouchableOpacity>
+      )}
     </View>
   </View>
 );
+
+const NEARBY_PLACES = [
+  { label: 'Hospitals', query: 'hospital', icon: Hospital, color: '#1E88E5' },
+  { label: 'Relief shelters', query: 'relief shelter', icon: Hotel, color: '#6D4C41' },
+  { label: 'Police stations', query: 'police station', icon: Siren, color: '#C62828' },
+];
 
 const HomeScreen = () => {
   const navigation = useNavigation<any>();
@@ -89,6 +112,7 @@ const HomeScreen = () => {
 
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [alerts, setAlerts] = useState<LiveAlertEvent[]>([]);
+  const [officialAlerts, setOfficialAlerts] = useState<OfficialAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
 
   useEffect(() => {
@@ -99,10 +123,12 @@ const HomeScreen = () => {
   }, [latitude, longitude]);
 
   useEffect(() => {
-    getLiveAlerts(2)
-      .then(setAlerts)
-      .catch(() => setAlerts([]))
-      .finally(() => setAlertsLoading(false));
+    // Official broadcasts from the control room come first on Home.
+    Promise.allSettled([getOfficialAlerts(2), getLiveAlerts(2)]).then(([official, quakes]) => {
+      if (official.status === 'fulfilled') setOfficialAlerts(official.value);
+      if (quakes.status === 'fulfilled') setAlerts(quakes.value);
+      setAlertsLoading(false);
+    });
   }, []);
 
   return (
@@ -171,8 +197,8 @@ const HomeScreen = () => {
             <Text style={styles.sosTitle}>EMERGENCY{'\n'}ASSISTANCE</Text>
 
             <Text style={styles.sosSubtitle}>
-              Press and hold the SOS button for 3 seconds to broadcast your GPS
-              location.
+              Tap SOS to open the emergency hub and send your GPS location to
+              the rescue control room.
             </Text>
 
             <TouchableOpacity
@@ -199,7 +225,7 @@ const HomeScreen = () => {
               <Text style={styles.sectionTitle}>Disaster Alerts</Text>
 
               <Text style={styles.sectionSubtitle}>
-                Critical events in your vicinity
+                Official alerts and major earthquakes
               </Text>
             </View>
           <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
@@ -211,9 +237,26 @@ const HomeScreen = () => {
             <Text style={styles.alertsLoadingText}>Loading live alerts…</Text>
           )}
 
-          {!alertsLoading && alerts.length === 0 && (
+          {!alertsLoading && alerts.length === 0 && officialAlerts.length === 0 && (
             <Text style={styles.alertsLoadingText}>No active events reported right now.</Text>
           )}
+
+          {officialAlerts.map(alert => {
+            const style = SEVERITY_STYLE[alert.severity] ?? SEVERITY_STYLE.Info;
+            return (
+              <AlertCard
+                key={alert.id}
+                type={`OFFICIAL · ${alert.severity.toUpperCase()}`}
+                title={alert.title}
+                desc={alert.message}
+                time={alert.location !== 'Unknown' ? alert.location.toUpperCase() : 'FROM AUTHORITIES'}
+                color={style.color}
+                bgColor={style.bgColor}
+                icon={Megaphone}
+                onMapPress={alert.lat != null ? () => openPoint(alert.lat, alert.lon) : undefined}
+              />
+            );
+          })}
 
           {alerts.map(event => {
             const style = SEVERITY_STYLE[event.severity] ?? SEVERITY_STYLE.Info;
@@ -226,24 +269,12 @@ const HomeScreen = () => {
                 time={event.updated}
                 color={style.color}
                 bgColor={style.bgColor}
-                icon={Droplets}
+                icon={Activity}
+                onMapPress={() => openPoint(event.lat, event.lon)}
               />
             );
           })}
 
-          {/* DISASTER HISTORY CARD */}
-          <View style={styles.historyCard}>
-            <View style={styles.historyIconContainer}>
-              <History size={24} color="#0D47A1" />
-            </View>
-            <View style={styles.historyInfo}>
-              <Text style={styles.historyTitle}>Disaster History</Text>
-              <Text style={styles.historySubtitle}>View past events and recovery efforts</Text>
-            </View>
-            <TouchableOpacity style={styles.historyViewBtn}>
-              <Text style={styles.historyViewBtnText}>VIEW</Text>
-            </TouchableOpacity>
-          </View>
 
           {/* REQUEST HELP SECTION */}
           <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
@@ -281,41 +312,26 @@ const HomeScreen = () => {
           </View>
 
           <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
-            Nearby Help Centers
+            Find Help Nearby
           </Text>
 
           <View style={styles.listCard}>
-            <TouchableOpacity style={styles.listItem}>
-              <View style={styles.listIconBox}>
-                <Bandage size={20} color="#1E88E5" />
-              </View>
-
-              <View style={styles.listContent}>
-                <Text style={styles.listName}>St. Jude Medical Point</Text>
-
-                <Text style={styles.listDetail}>
-                  Open 24/7 • Tap for directions
-                </Text>
-              </View>
-
-              <ChevronRight size={20} color="#BDBDBD" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.listItem}>
-              <View style={styles.listIconBox}>
-                <Hotel size={20} color="#6D4C41" />
-              </View>
-
-              <View style={styles.listContent}>
-                <Text style={styles.listName}>Community Shelter #4</Text>
-
-                <Text style={styles.listDetail}>
-                  Tap to check current capacity
-                </Text>
-              </View>
-
-              <ChevronRight size={20} color="#BDBDBD" />
-            </TouchableOpacity>
+            {NEARBY_PLACES.map(place => (
+              <TouchableOpacity
+                key={place.query}
+                style={styles.listItem}
+                onPress={() => openNearby(place.query, latitude, longitude)}
+              >
+                <View style={styles.listIconBox}>
+                  <place.icon size={20} color={place.color} />
+                </View>
+                <View style={styles.listContent}>
+                  <Text style={styles.listName}>{place.label}</Text>
+                  <Text style={styles.listDetail}>Opens Google Maps near you</Text>
+                </View>
+                <ChevronRight size={20} color="#BDBDBD" />
+              </TouchableOpacity>
+            ))}
           </View>
         </ScrollView>
 
@@ -570,49 +586,6 @@ const styles = StyleSheet.create({ // Renamed safeArea to container
     fontSize: 12,
     color: '#666',
     marginLeft: 4,
-  },
-  historyCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    borderRadius: 20,
-    padding: 15,
-    marginBottom: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-  },
-  historyIconContainer: {
-    backgroundColor: '#E3F2FD',
-    padding: 10,
-    borderRadius: 12,
-    marginRight: 15,
-  },
-  historyInfo: {
-    flex: 1,
-  },
-  historyTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#1A1A1A',
-  },
-  historySubtitle: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  historyViewBtn: {
-    backgroundColor: '#0D47A1',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  historyViewBtnText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '700',
   },
   requestHelpGrid: {
     flexDirection: 'row',

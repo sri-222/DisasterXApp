@@ -35,11 +35,11 @@ const BottomTabBar: React.FC<BottomTabBarProps> = ({ activeTab }) => {
   return (
     <View style={[styles.tabBarWrapper, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
       <View style={styles.tabBar}>
-        <TabItem icon={Home} label="HOME" active={activeTab === 'HOME'} onPress={() => navigation.navigate('Home')} />
-        <TabItem icon={Radio} label="SOS" active={activeTab === 'SOS'} onPress={() => navigation.navigate('SOS')} />
-        <TabItem icon={Bell} label="ALERTS" active={activeTab === 'ALERTS'} onPress={() => navigation.navigate('Alerts')} />
-        <TabItem icon={HandHelping} label="VOLUNTEER" active={activeTab === 'VOLUNTEER'} onPress={() => navigation.navigate('Volunteer')} />
-        <TabItem icon={CircleUser} label="PROFILE" active={activeTab === 'PROFILE'} onPress={() => navigation.navigate('Profile')} />
+        <TabItem icon={Home} label="HOME" active={activeTab === 'HOME'} onPress={() => navigation.navigate('Home', undefined, { pop: true })} />
+        <TabItem icon={Radio} label="SOS" active={activeTab === 'SOS'} onPress={() => navigation.navigate('SOS', undefined, { pop: true })} />
+        <TabItem icon={Bell} label="ALERTS" active={activeTab === 'ALERTS'} onPress={() => navigation.navigate('Alerts', undefined, { pop: true })} />
+        <TabItem icon={HandHelping} label="VOLUNTEER" active={activeTab === 'VOLUNTEER'} onPress={() => navigation.navigate('Volunteer', undefined, { pop: true })} />
+        <TabItem icon={CircleUser} label="PROFILE" active={activeTab === 'PROFILE'} onPress={() => navigation.navigate('Profile', undefined, { pop: true })} />
       </View>
     </View>
   );
