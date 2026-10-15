@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import {
   StyleSheet,
@@ -6,34 +6,37 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Image,
   StatusBar,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 
 import {
-  User,
   MapPin,
   ChevronRight,
   Radio,
   Droplets,
   Bandage,
   Hotel,
-  CloudSun, // Added for weather icon
-  RefreshCw, // Added
-  History, // Added for disaster history
-  Utensils, // Added for food request
-  Pill, // Added for medicine request
-  Home as HomeIcon, // Renamed to avoid conflict with screen name
-  MoreHorizontal, // Added for other requests
+  CloudSun,
+  History,
+  Utensils,
+  Pill,
+  Home as HomeIcon,
+  MoreHorizontal,
 } from 'lucide-react-native';
 import BottomTabBar from '../component/BottomTabBar';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
+import { getLiveAlerts, getWeather, LiveAlertEvent, WeatherData } from './api';
+import { colors } from '../theme';
 
-const { width } = Dimensions.get('window');
+const SEVERITY_STYLE: Record<LiveAlertEvent['severity'], { color: string; bgColor: string }> = {
+  Danger: { color: '#C62828', bgColor: '#FFEBEE' },
+  Warning: { color: '#A66114', bgColor: '#FFF3E0' },
+  Info: { color: '#0D47A1', bgColor: '#E3F2FD' },
+  Safe: { color: '#2E7D32', bgColor: '#E8F5E9' },
+};
 
 const AlertCard = ({
   type,
@@ -73,23 +76,38 @@ const HomeScreen = () => {
   const navigation = useNavigation<any>();
   const {
     currentLocation,
-    locationLoading,
+    latitude,
+    longitude,
     locationError,
     fetchLocation,
     isPermissionDenied,
     openLocationSettings,
   } = useLocation();
 
-  useEffect(() => {
-    fetchLocation();
-  }, [fetchLocation]);
-
   const permissionBannerActive =
     isPermissionDenied || locationError?.toLowerCase().includes('permission');
 
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [alerts, setAlerts] = useState<LiveAlertEvent[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+
+  useEffect(() => {
+    if (latitude == null || longitude == null) return;
+    getWeather(latitude, longitude)
+      .then(setWeather)
+      .catch(() => setWeather(null));
+  }, [latitude, longitude]);
+
+  useEffect(() => {
+    getLiveAlerts(2)
+      .then(setAlerts)
+      .catch(() => setAlerts([]))
+      .finally(() => setAlertsLoading(false));
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.backgroundAlt} />
 
       <AppHeader
         showLogo
@@ -130,8 +148,12 @@ const HomeScreen = () => {
             <CloudSun size={24} color="#FFB300" />
           </View>
           <View style={styles.weatherInfo}>
-            <Text style={styles.weatherTemp}>28°C</Text>
-            <Text style={styles.weatherCondition}>Partly Cloudy</Text>
+            <Text style={styles.weatherTemp}>
+              {weather?.temperature != null ? `${Math.round(weather.temperature)}°C` : '--°C'}
+            </Text>
+            <Text style={styles.weatherCondition}>
+              {weather?.conditions || 'Tap for live conditions'}
+            </Text>
           </View>
           {currentLocation &&
             currentLocation !== 'Permission Denied' &&
@@ -156,6 +178,7 @@ const HomeScreen = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               style={styles.sosButtonContainer}
+              onPress={() => navigation.navigate('SOS')}
             >
               <View style={styles.sosCircleInner}>
                 <Radio color="#FFF" size={32} />
@@ -184,25 +207,29 @@ const HomeScreen = () => {
             </TouchableOpacity>
           </View>
 
-          <AlertCard
-            type="EXTREME"
-            title="Flash Flood Warning"
-            desc="Downtown Basin Area. Seek higher ground immediately. Duration: 6 hours."
-            time="2M AGO"
-            color="#C62828"
-            bgColor="#FFEBEE"
-            icon={Droplets}
-          />
+          {alertsLoading && (
+            <Text style={styles.alertsLoadingText}>Loading live alerts…</Text>
+          )}
 
-          <AlertCard
-            type="SEVERE"
-            title="Wildfire Advisory"
-            desc="North Ridge Sector. Evacuation standby for Zone A-4. High winds."
-            time="14M AGO"
-            color="#A66114"
-            bgColor="#FFF3E0"
-            icon={Radio}
-          />
+          {!alertsLoading && alerts.length === 0 && (
+            <Text style={styles.alertsLoadingText}>No active events reported right now.</Text>
+          )}
+
+          {alerts.map(event => {
+            const style = SEVERITY_STYLE[event.severity] ?? SEVERITY_STYLE.Info;
+            return (
+              <AlertCard
+                key={event.id}
+                type={event.severity.toUpperCase()}
+                title={`M${event.magnitude.toFixed(1)} Earthquake`}
+                desc={event.detail}
+                time={event.updated}
+                color={style.color}
+                bgColor={style.bgColor}
+                icon={Droplets}
+              />
+            );
+          })}
 
           {/* DISASTER HISTORY CARD */}
           <View style={styles.historyCard}>
@@ -219,33 +246,41 @@ const HomeScreen = () => {
           </View>
 
           {/* REQUEST HELP SECTION */}
-          <Text
-            style={[styles.sectionTitle, { marginTop: 20, marginBottom: 15 }]}
-          >
+          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
             Need Assistance?
           </Text>
           <View style={styles.requestHelpGrid}>
-            <TouchableOpacity style={styles.requestHelpItem}>
+            <TouchableOpacity
+              style={styles.requestHelpItem}
+              onPress={() => navigation.navigate('RequestHelp', { category: 'Food' })}
+            >
               <Utensils size={28} color="#C62828" />
               <Text style={styles.requestHelpText}>Food</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.requestHelpItem}>
+            <TouchableOpacity
+              style={styles.requestHelpItem}
+              onPress={() => navigation.navigate('RequestHelp', { category: 'Medicine' })}
+            >
               <Pill size={28} color="#0D47A1" />
               <Text style={styles.requestHelpText}>Medicine</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.requestHelpItem}>
+            <TouchableOpacity
+              style={styles.requestHelpItem}
+              onPress={() => navigation.navigate('RequestHelp', { category: 'Shelter' })}
+            >
               <HomeIcon size={28} color="#A66114" />
               <Text style={styles.requestHelpText}>Shelter</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.requestHelpItem}>
+            <TouchableOpacity
+              style={styles.requestHelpItem}
+              onPress={() => navigation.navigate('RequestHelp', { category: 'Other' })}
+            >
               <MoreHorizontal size={28} color="#444" />
               <Text style={styles.requestHelpText}>Others</Text>
             </TouchableOpacity>
           </View>
 
-          <Text
-            style={[styles.sectionTitle, { marginTop: 20, marginBottom: 15 }]}
-          >
+          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
             Nearby Help Centers
           </Text>
 
@@ -259,7 +294,7 @@ const HomeScreen = () => {
                 <Text style={styles.listName}>St. Jude Medical Point</Text>
 
                 <Text style={styles.listDetail}>
-                  0.8 miles away • Open 24/7
+                  Open 24/7 • Tap for directions
                 </Text>
               </View>
 
@@ -275,7 +310,7 @@ const HomeScreen = () => {
                 <Text style={styles.listName}>Community Shelter #4</Text>
 
                 <Text style={styles.listDetail}>
-                  1.5 miles away • Capacity: 65%
+                  Tap to check current capacity
                 </Text>
               </View>
 
@@ -400,6 +435,10 @@ const styles = StyleSheet.create({ // Renamed safeArea to container
     fontSize: 22,
     fontWeight: '800',
   },
+  sectionTitleSpaced: {
+    marginTop: 20,
+    marginBottom: 15,
+  },
   sectionSubtitle: {
     color: '#757575',
     fontSize: 13,
@@ -411,6 +450,11 @@ const styles = StyleSheet.create({ // Renamed safeArea to container
   alertCard: {
     borderRadius: 20,
     padding: 20,
+    marginBottom: 15,
+  },
+  alertsLoadingText: {
+    color: '#757575',
+    fontSize: 13,
     marginBottom: 15,
   },
   alertHeader: {

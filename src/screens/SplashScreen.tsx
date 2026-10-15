@@ -10,6 +10,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigator/types';
+import { restoreSession } from './api';
 
 const { width } = Dimensions.get('window');
 
@@ -43,12 +44,21 @@ const SplashScreen: React.FC = () => {
     ]).start();
 
     // 3. Quick Navigation: Reduced delay to 1.8s total
-    // This allows the animation to finish (1s) + 800ms of "brand settle" time
-    const timer = setTimeout(() => {
-      navigation.replace('Login');
-    }, 1800); 
+    // This allows the animation to finish (1s) + 800ms of "brand settle" time.
+    // In parallel, validate any stored token against the server-side session
+    // so a restart lands straight on Home when still logged in, or Login
+    // when the token is missing/expired/invalidated.
+    let cancelled = false;
+    const minDelay = new Promise<void>(resolve => setTimeout(resolve, 1800));
 
-    return () => clearTimeout(timer);
+    Promise.all([minDelay, restoreSession()]).then(([, user]) => {
+      if (cancelled) return;
+      navigation.replace(user ? 'Home' : 'Login');
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [fadeAnim, scaleAnim, slideAnim, navigation]);
 
   return (

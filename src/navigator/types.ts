@@ -8,4 +8,5 @@ export type RootStackParamList = {
   Volunteer: undefined;
   Profile: undefined;
   Weather: undefined; // Added for the new WeatherScreen
+  RequestHelp: { category: 'Food' | 'Medicine' | 'Shelter' | 'Other' };
 };

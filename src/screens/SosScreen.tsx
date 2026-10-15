@@ -5,48 +5,83 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   Image,
-  ImageBackground,
   StatusBar,
-  Dimensions,
-  Platform,
+  ActivityIndicator,
+  Alert,
+  Linking,
 } from 'react-native';
-import { 
-  Navigation, 
-  Battery, 
-  Waves, 
-  Flame, 
-  PlusSquare, 
-  Mountain, 
-  Send, 
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Navigation,
+  Battery,
+  Waves,
+  Flame,
+  PlusSquare,
+  Mountain,
+  Send,
   PhoneCall,
-  Asterisk
+  Asterisk,
 } from 'lucide-react-native';
 import BottomTabBar from '../component/BottomTabBar';
+import { useLocation } from './LocationContext';
+import { submitSos, CrisisType } from './api';
+import { colors } from '../theme';
 
-const { width } = Dimensions.get('window');
+const EMERGENCY_DIAL_NUMBER = '112';
 
 // 1. Reusable Crisis Type Component
 const CrisisItem = ({ title, desc, icon: Icon, selected, onPress }: any) => (
-  <TouchableOpacity 
+  <TouchableOpacity
     onPress={onPress}
-    activeOpacity={0.8} 
+    activeOpacity={0.8}
     style={[styles.crisisBox, selected && styles.crisisBoxSelected]}
   >
-    <Icon size={28} color={selected ? "#C62828" : "#1A1A1A"} />
+    <Icon size={28} color={selected ? colors.danger : colors.textPrimary} />
     <Text style={styles.crisisTitleText}>{title}</Text>
     <Text style={styles.crisisDescText}>{desc}</Text>
   </TouchableOpacity>
 );
 
 const SOSScreen: React.FC = () => {
-  const [selectedCrisis, setSelectedCrisis] = useState('Flood');
+  const [selectedCrisis, setSelectedCrisis] = useState<CrisisType>('Flood');
+  const [submitting, setSubmitting] = useState(false);
+  const { currentLocation, latitude, longitude } = useLocation();
+
+  const handleSendSos = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitSos({
+        crisisType: selectedCrisis,
+        latitude: latitude ?? undefined,
+        longitude: longitude ?? undefined,
+        address: currentLocation ?? undefined,
+      });
+      Alert.alert(
+        'SOS Sent',
+        'Your emergency alert has been submitted with your current location. Responders have been notified.'
+      );
+    } catch (err: any) {
+      Alert.alert(
+        'Could not send SOS',
+        err.message || 'Please check your connection and try again, or use Direct Call below.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDirectCall = () => {
+    Linking.openURL(`tel:${EMERGENCY_DIAL_NUMBER}`).catch(() => {
+      Alert.alert('Unable to start call', `Please dial ${EMERGENCY_DIAL_NUMBER} manually.`);
+    });
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      
+
       {/* HEADER */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
@@ -57,7 +92,6 @@ const SOSScreen: React.FC = () => {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        
         {/* TOP STATUS BAR */}
         <View style={styles.statusRow}>
           <View>
@@ -67,68 +101,64 @@ const SOSScreen: React.FC = () => {
           <View style={styles.batteryContainer}>
             <Text style={styles.batteryLabel}>BATTERY</Text>
             <View style={styles.batteryRow}>
-              <Battery size={16} color="#000" />
-              <Text style={styles.batteryValue}>84%</Text>
+              <Battery size={16} color={colors.textPrimary} />
+              <Text style={styles.batteryValue}>Device</Text>
             </View>
           </View>
         </View>
 
-        {/* LOCATION MAP CARD */}
-        <View style={styles.mapCard}>
-          <ImageBackground 
-            source={{ uri: 'https://api.mapbox.com/styles/v1/mapbox/light-v10/static/-122.39,37.79,14,0/600x300?access_token=YOUR_TOKEN' }}
-            style={styles.mapBg}
-            imageStyle={{ borderRadius: 20 }}
-          >
-            <View style={styles.mapPinContainer}>
-               <View style={styles.mapPinOuter}>
-                  <View style={styles.mapPinInner} />
-               </View>
+        {/* LOCATION CARD */}
+        <View style={styles.locationCard}>
+          <View style={styles.mapPinContainer}>
+            <View style={styles.mapPinOuter}>
+              <View style={styles.mapPinInner} />
             </View>
-            
-            <View style={styles.addressOverlay}>
-              <View style={styles.addressIconBox}>
-                <Navigation size={20} color="#0D47A1" />
-              </View>
-              <View style={styles.addressTextContent}>
-                <Text style={styles.addressLabel}>ESTIMATED ADDRESS</Text>
-                <Text style={styles.addressText}>350 Mission St, San Francisco, CA</Text>
-              </View>
+          </View>
+
+          <View style={styles.addressOverlay}>
+            <View style={styles.addressIconBox}>
+              <Navigation size={20} color={colors.info} />
             </View>
-          </ImageBackground>
+            <View style={styles.addressTextContent}>
+              <Text style={styles.addressLabel}>YOUR LOCATION</Text>
+              <Text style={styles.addressText} numberOfLines={2}>
+                {currentLocation || 'Resolving your location…'}
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* CRISIS SELECTION GRID */}
         <Text style={styles.sectionLabel}>SELECT CRISIS TYPE</Text>
         <View style={styles.grid}>
           <View style={styles.gridRow}>
-            <CrisisItem 
-              title="Flood" 
-              desc="Rising waters, entrapment" 
-              icon={Waves} 
+            <CrisisItem
+              title="Flood"
+              desc="Rising waters, entrapment"
+              icon={Waves}
               selected={selectedCrisis === 'Flood'}
               onPress={() => setSelectedCrisis('Flood')}
             />
-            <CrisisItem 
-              title="Fire" 
-              desc="Wildfire, smoke, structural" 
-              icon={Flame} 
+            <CrisisItem
+              title="Fire"
+              desc="Wildfire, smoke, structural"
+              icon={Flame}
               selected={selectedCrisis === 'Fire'}
               onPress={() => setSelectedCrisis('Fire')}
             />
           </View>
           <View style={styles.gridRow}>
-            <CrisisItem 
-              title="Medical" 
-              desc="Injury, heart, trauma" 
-              icon={PlusSquare} 
+            <CrisisItem
+              title="Medical"
+              desc="Injury, heart, trauma"
+              icon={PlusSquare}
               selected={selectedCrisis === 'Medical'}
               onPress={() => setSelectedCrisis('Medical')}
             />
-            <CrisisItem 
-              title="Earthquake" 
-              desc="Quake, collapse, tremor" 
-              icon={Mountain} 
+            <CrisisItem
+              title="Earthquake"
+              desc="Quake, collapse, tremor"
+              icon={Mountain}
               selected={selectedCrisis === 'Earthquake'}
               onPress={() => setSelectedCrisis('Earthquake')}
             />
@@ -137,24 +167,36 @@ const SOSScreen: React.FC = () => {
 
         {/* LARGE SOS BUTTON TRIGGER */}
         <View style={styles.sosTriggerArea}>
-           <TouchableOpacity activeOpacity={0.9} style={styles.sosCircle}>
-              <Asterisk color="#FFF" size={40} strokeWidth={3} />
-              <Text style={styles.sosCircleText}>SOS</Text>
-           </TouchableOpacity>
-           <Text style={styles.sosInstructions}>Hold SOS for 3 seconds or tap below</Text>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={styles.sosCircle}
+            onPress={handleSendSos}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator color={colors.white} size="large" />
+            ) : (
+              <>
+                <Asterisk color={colors.white} size={40} strokeWidth={3} />
+                <Text style={styles.sosCircleText}>SOS</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.sosInstructions}>Tap SOS to broadcast your location and crisis type</Text>
         </View>
 
         {/* ACTION BUTTONS */}
-        <TouchableOpacity style={styles.confirmBtn}>
-          <Text style={styles.confirmBtnText}>Send SOS Confirmation</Text>
-          <Send size={18} color="#FFF" />
+        <TouchableOpacity style={styles.confirmBtn} onPress={handleSendSos} disabled={submitting}>
+          <Text style={styles.confirmBtnText}>
+            {submitting ? 'Sending…' : 'Send SOS Confirmation'}
+          </Text>
+          {!submitting && <Send size={18} color={colors.white} />}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.directCallBtn}>
-          <PhoneCall size={18} color="#5D4037" />
+        <TouchableOpacity style={styles.directCallBtn} onPress={handleDirectCall}>
+          <PhoneCall size={18} color={colors.warning} />
           <Text style={styles.directCallText}>Direct Call Emergency Services</Text>
         </TouchableOpacity>
-
       </ScrollView>
 
       <BottomTabBar activeTab="SOS" />
@@ -163,16 +205,15 @@ const SOSScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#F8F9FA',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     padding: 20,
-    backgroundColor: '#FFF',
+    backgroundColor: colors.white,
     alignItems: 'center',
   },
   logo: {
@@ -182,7 +223,7 @@ const styles = StyleSheet.create({
   systemBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFEBEE',
+    backgroundColor: colors.dangerLight,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
@@ -191,11 +232,11 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#C62828',
+    backgroundColor: colors.danger,
     marginRight: 6,
   },
   systemText: {
-    color: '#C62828',
+    color: colors.danger,
     fontSize: 10,
     fontWeight: '900',
   },
@@ -211,13 +252,13 @@ const styles = StyleSheet.create({
   statusLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#0D47A1',
+    color: colors.info,
     letterSpacing: 0.5,
   },
   mainHeading: {
     fontSize: 32,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: colors.textPrimary,
   },
   batteryContainer: {
     alignItems: 'flex-end',
@@ -225,7 +266,7 @@ const styles = StyleSheet.create({
   batteryLabel: {
     fontSize: 10,
     fontWeight: '800',
-    color: '#757575',
+    color: colors.textMuted,
     marginBottom: 4,
   },
   batteryRow: {
@@ -237,17 +278,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginLeft: 4,
   },
-  mapCard: {
-    height: 200,
+  locationCard: {
+    height: 140,
     marginBottom: 25,
-  },
-  mapBg: {
-    flex: 1,
+    backgroundColor: colors.infoLight,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
   mapPinContainer: {
-    marginBottom: 30,
+    marginBottom: 10,
   },
   mapPinOuter: {
     width: 30,
@@ -261,15 +301,13 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#C62828',
+    backgroundColor: colors.danger,
     borderWidth: 2,
-    borderColor: '#FFF',
+    borderColor: colors.white,
   },
   addressOverlay: {
-    position: 'absolute',
-    bottom: 15,
-    width: width - 70,
-    backgroundColor: '#FFF',
+    width: '90%',
+    backgroundColor: colors.white,
     borderRadius: 15,
     padding: 12,
     flexDirection: 'row',
@@ -280,27 +318,28 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: '#E3F2FD',
+    backgroundColor: colors.infoLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   addressTextContent: {
     marginLeft: 12,
+    flex: 1,
   },
   addressLabel: {
     fontSize: 9,
     fontWeight: '800',
-    color: '#9E9E9E',
+    color: colors.textFaint,
   },
   addressText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: colors.textPrimary,
   },
   sectionLabel: {
     fontSize: 10,
     fontWeight: '900',
-    color: '#9E9E9E',
+    color: colors.textFaint,
     letterSpacing: 1,
     marginBottom: 15,
   },
@@ -313,28 +352,28 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   crisisBox: {
-    width: (width - 55) / 2,
-    backgroundColor: '#FFF',
+    width: '48%',
+    backgroundColor: colors.white,
     borderRadius: 15,
     padding: 18,
     elevation: 2,
-    shadowColor: '#000',
+    shadowColor: colors.black,
     shadowOpacity: 0.05,
     shadowRadius: 5,
   },
   crisisBoxSelected: {
     borderWidth: 2,
-    borderColor: '#C62828',
+    borderColor: colors.danger,
   },
   crisisTitleText: {
     fontSize: 16,
     fontWeight: '800',
     marginTop: 12,
-    color: '#1A1A1A',
+    color: colors.textPrimary,
   },
   crisisDescText: {
     fontSize: 11,
-    color: '#757575',
+    color: colors.textMuted,
     marginTop: 4,
     lineHeight: 15,
   },
@@ -346,29 +385,30 @@ const styles = StyleSheet.create({
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#C62828',
+    backgroundColor: colors.danger,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#C62828',
+    shadowColor: colors.danger,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.4,
     shadowRadius: 20,
     elevation: 10,
   },
   sosCircleText: {
-    color: '#FFF',
+    color: colors.white,
     fontSize: 28,
     fontWeight: '900',
     marginTop: 5,
   },
   sosInstructions: {
     fontSize: 13,
-    color: '#757575',
+    color: colors.textMuted,
     marginTop: 20,
     fontWeight: '600',
+    textAlign: 'center',
   },
   confirmBtn: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: colors.textPrimary,
     borderRadius: 30,
     height: 60,
     flexDirection: 'row',
@@ -377,13 +417,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   confirmBtnText: {
-    color: '#FFF',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '800',
     marginRight: 10,
   },
   directCallBtn: {
-    backgroundColor: '#EBEBEB',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 30,
     height: 54,
     flexDirection: 'row',
@@ -391,7 +431,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   directCallText: {
-    color: '#5D4037',
+    color: colors.warning,
     fontSize: 14,
     fontWeight: '700',
     marginLeft: 10,

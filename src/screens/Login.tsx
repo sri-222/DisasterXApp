@@ -1,28 +1,26 @@
 import React, { useState } from 'react';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  StyleSheet,
   View,
   Text,
-  TextInput,
   TouchableOpacity,
-  StatusBar,
   Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
-// 1. Import Navigation hooks and your types
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigator/types'; 
+import { RootStackParamList } from '../navigator/types';
 
 import { Mail, Lock, Eye, EyeOff, UserPlus, ArrowRight } from 'lucide-react-native';
 import { login } from './api';
+import { saveUserProfile } from '../services/userProfileStorage';
+import { saveToken } from '../services/authSession';
+import { Button, Card, ScreenContainer, TextField } from '../components/ui';
+import { colors, spacing, typography } from '../theme';
 
 const SignInScreen: React.FC = () => {
-  // 2. Initialize the navigation hook
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [email, setEmail] = useState('');
@@ -41,7 +39,16 @@ const SignInScreen: React.FC = () => {
     setIsLoading(true);
 
     try {
-      await login({ email, password });
+      const response = await login({ email, password });
+      await saveToken(response.token);
+      await saveUserProfile({
+        name: response.user.name,
+        // Pass through as-is: null/undefined here means "server didn't
+        // return a phone", and saveUserProfile preserves whatever was
+        // already cached in that case instead of overwriting it with ''.
+        phone: response.user.phone ?? undefined,
+        email: response.user.email,
+      });
       navigation.reset({
         index: 0,
         routes: [{ name: 'Home' }],
@@ -54,99 +61,82 @@ const SignInScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f4f4f4" />
-      
+    <ScreenContainer backgroundColor={colors.background}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
+        style={styles.flex}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.scrollContainer}
         >
-          
           <View style={styles.header}>
             <Image
-              source={require('./assets/logo.png')} // Path updated to look in parent assets folder
+              source={require('./assets/logo.png')}
               style={styles.logoImage}
               resizeMode="contain"
             />
             <Text style={styles.logoText}>DISASTERX</Text>
-            <Text style={styles.subtitle}>
-              Crisis management for a safer tomorrow.
-            </Text>
+            <Text style={styles.subtitle}>Crisis management for a safer tomorrow.</Text>
           </View>
 
-          <View style={styles.card}>
+          <Card>
             <Text style={styles.title}>Sign In</Text>
 
-            <Text style={styles.inputLabel}>EMAIL OR PHONE</Text>
-            <View style={styles.inputContainer}>
-              <Mail size={20} color="#999" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="name@example.com"
-                placeholderTextColor="#999"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
+            <TextField
+              label="EMAIL OR PHONE"
+              placeholder="name@example.com"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              icon={<Mail size={20} color={colors.textFaint} />}
+            />
 
             <View style={styles.passwordLabelRow}>
-              <Text style={styles.inputLabel}>PASSWORD</Text>
+              <Text style={styles.passwordLabel}>PASSWORD</Text>
               <TouchableOpacity>
                 <Text style={styles.forgotText}>FORGOT?</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.inputContainer}>
-              <Lock size={20} color="#999" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="••••••••"
-                placeholderTextColor="#999"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={secureText}
-              />
-              <TouchableOpacity onPress={() => setSecureText(!secureText)}>
-                {secureText ? <EyeOff size={20} color="#999" /> : <Eye size={20} color="#999" />}
-              </TouchableOpacity>
-            </View>
+            <TextField
+              placeholder="••••••••"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={secureText}
+              icon={<Lock size={20} color={colors.textFaint} />}
+              rightAccessory={
+                <TouchableOpacity onPress={() => setSecureText(!secureText)}>
+                  {secureText ? (
+                    <EyeOff size={20} color={colors.textFaint} />
+                  ) : (
+                    <Eye size={20} color={colors.textFaint} />
+                  )}
+                </TouchableOpacity>
+              }
+            />
 
-            {errorMessage ? (
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            ) : null}
-            <TouchableOpacity
-              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
-              activeOpacity={0.8}
+            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+
+            <Button
+              label="Login"
               onPress={handleLogin}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Text style={styles.loginButtonText}>Login</Text>
-                  <ArrowRight size={20} color="#fff" />
-                </>
-              )}
-            </TouchableOpacity>
+              loading={isLoading}
+              icon={<ArrowRight size={20} color={colors.white} style={styles.btnIcon} />}
+              style={styles.loginButton}
+            />
 
             <Text style={styles.orDivider}>OR</Text>
 
-            {/* 3. Added navigation.navigate('Register') here */}
-            <TouchableOpacity 
-              style={styles.createAccountButton}
+            <Button
+              label="Create New Account"
+              variant="outline"
               onPress={() => navigation.navigate('Register')}
-            >
-              <UserPlus size={18} color="#000" style={styles.createIcon} />
-              <Text style={styles.createAccountText}>Create New Account</Text>
-            </TouchableOpacity>
-          </View>
+              icon={<UserPlus size={18} color={colors.textPrimary} style={styles.btnIcon} />}
+              iconPosition="left"
+            />
+          </Card>
 
           <View style={styles.footerLinksRow}>
             <TouchableOpacity style={styles.footerLinkItem}>
@@ -156,157 +146,94 @@ const SignInScreen: React.FC = () => {
               <Text style={styles.footerLinkText}>EMERGENCY OFFLINE</Text>
             </TouchableOpacity>
           </View>
-          
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  flex: {
     flex: 1,
-    backgroundColor: '#f4f4f4',
   },
   scrollContainer: {
-    paddingHorizontal: 24,
-    paddingTop: 50,
-    paddingBottom: 30,
+    flexGrow: 1,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.xxxl,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 36,
   },
   logoImage: {
     width: 80,
     height: 80,
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   logoText: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#000',
+    color: colors.textPrimary,
     letterSpacing: 1,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   subtitle: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textMuted,
     textAlign: 'center',
   },
-  card: {
-    backgroundColor: '#fff',
-    width: '100%',
-    borderRadius: 16,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
-  },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#000',
-    marginBottom: 24,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#444',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f1f1f1',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 48,
-    marginBottom: 16,
-  },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    color: '#000',
-    fontSize: 15,
+    ...typography.title,
+    color: colors.textPrimary,
+    marginBottom: spacing.xxl,
   },
   passwordLabelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  passwordLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textFaint,
+    marginBottom: spacing.sm,
+    letterSpacing: 0.8,
+  },
   forgotText: {
-    fontSize: 12,
-    color: '#444',
-    fontWeight: '600',
+    ...typography.caption,
+    color: colors.textSecondary,
   },
   loginButton: {
-    flexDirection: 'row',
-    backgroundColor: '#000',
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
+    marginTop: spacing.sm,
   },
-  loginButtonDisabled: {
-    opacity: 0.6,
-  },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginRight: 8,
+  btnIcon: {
+    marginHorizontal: spacing.sm,
   },
   errorText: {
-    color: '#C62828',
+    color: colors.danger,
     fontSize: 12,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
     textAlign: 'center',
   },
   orDivider: {
     textAlign: 'center',
-    color: '#999',
+    color: colors.textFaint,
     fontSize: 13,
-    marginVertical: 20,
-  },
-  createAccountButton: {
-    flexDirection: 'row',
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  createAccountText: {
-    color: '#000',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  createIcon: {
-    marginRight: 8,
+    marginVertical: spacing.xl,
   },
   footerLinksRow: {
     flexDirection: 'row',
-    marginTop: 30,
+    marginTop: spacing.xxxl,
     justifyContent: 'center',
   },
   footerLinkItem: {
     paddingHorizontal: 15,
   },
   footerLinkText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    ...typography.caption,
+    color: colors.textMuted,
   },
 });
 

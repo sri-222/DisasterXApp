@@ -10,13 +10,17 @@ import {
   PermissionsAndroid,
   Linking,
 } from 'react-native';
-import Geolocation from '@react-native-community/geolocation';
+import Geolocation, {
+  GeolocationError,
+} from '@react-native-community/geolocation';
 
 interface LocationContextType {
   currentLocation: string | null;
+  latitude: number | null;
+  longitude: number | null;
   locationLoading: boolean;
   locationError: string | null;
-  fetchLocation: () => Promise<void>;
+  fetchLocation: () => Promise<{latitude: number; longitude: number} | null>;
   isPermissionDenied: boolean;
   openLocationSettings: () => Promise<void>;
 }
@@ -29,6 +33,8 @@ export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isPermissionDenied, setIsPermissionDenied] = useState(false);
@@ -127,6 +133,26 @@ export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({
     [],
   );
 
+  const requestPosition = useCallback(
+    (options: {enableHighAccuracy: boolean; timeout: number; maximumAge: number}) =>
+      new Promise<
+        {coords: {latitude: number; longitude: number}} | {error: GeolocationError}
+      >(resolve => {
+        Geolocation.getCurrentPosition(
+          position =>
+            resolve({
+              coords: {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+              },
+            }),
+          error => resolve({error}),
+          options,
+        );
+      }),
+    [],
+  );
+
   const fetchLocation = useCallback(async () => {
     setLocationLoading(true);
     setLocationError(null);
@@ -136,27 +162,47 @@ export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({
       setLocationError('Location permission denied.');
       setCurrentLocation('Permission Denied');
       setLocationLoading(false);
-      return;
+      return null;
     }
 
-    Geolocation.getCurrentPosition(
-      position => {
-        const { latitude, longitude } = position.coords;
-        setCurrentLocation(
-          `Lat: ${latitude.toFixed(4)}, Lon: ${longitude.toFixed(4)}`,
-        ); // Set raw coords first
-        reverseGeocode(latitude, longitude); // Then reverse geocode
-        setLocationLoading(false);
-      },
-      error => {
-        console.error('Error getting location:', error);
-        setLocationError(`Error: ${error.message}`);
-        setCurrentLocation('Location Unavailable');
-        setLocationLoading(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 },
-    );
-  }, [requestLocationPermission, reverseGeocode]);
+    let result = await requestPosition({
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 10000,
+    });
+
+    // A GPS-only fix (enableHighAccuracy) can time out or be unavailable
+    // indoors / with a weak signal - fall back once to faster, less precise
+    // network-based location instead of failing outright.
+    if ('error' in result && (result.error.code === 2 || result.error.code === 3)) {
+      result = await requestPosition({
+        enableHighAccuracy: false,
+        timeout: 10000,
+        maximumAge: 60000,
+      });
+    }
+
+    if ('coords' in result) {
+      const {latitude: lat, longitude: lon} = result.coords;
+      setLatitude(lat);
+      setLongitude(lon);
+      setCurrentLocation(`Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`);
+      reverseGeocode(lat, lon);
+      setLocationLoading(false);
+      return result.coords;
+    }
+
+    const {error} = result;
+    const message = error?.message || 'Unable to determine your location right now.';
+    console.error(`Error getting location (code ${error?.code ?? 'unknown'}): ${message}`);
+    setLocationError(message);
+    setCurrentLocation(error?.code === 1 ? 'Permission Denied' : 'Location Unavailable');
+    if (error?.code === 1) {
+      setIsPermissionDenied(true);
+    }
+    setLocationLoading(false);
+    return null;
+  }, [requestLocationPermission, requestPosition, reverseGeocode]);
 
   const openLocationSettings = useCallback(async () => {
     try {
@@ -166,13 +212,14 @@ export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // Fetch location only once when the provider mounts
   useEffect(() => {
     fetchLocation();
   }, [fetchLocation]);
 
   const value = {
     currentLocation,
+    latitude,
+    longitude,
     locationLoading,
     locationError,
     fetchLocation,

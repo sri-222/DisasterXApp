@@ -1,33 +1,33 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   Image,
   StatusBar,
-  Dimensions,
-  ImageBackground,
-  Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
-import { 
-  X, 
-  ShieldCheck, 
-  Truck, 
-  Users, 
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import {
+  X,
+  ShieldCheck,
+  Truck,
+  Users,
   Info,
 } from 'lucide-react-native';
 import BottomTabBar from '../component/BottomTabBar';
-
-const { width } = Dimensions.get('window');
+import { getMe, getRequestsStats, joinVolunteer, leaveVolunteer, VolunteerStatus } from './api';
+import { colors } from '../theme';
 
 // Reusable Benefit Row Component
 const BenefitRow = ({ icon: Icon, title, desc }: any) => (
   <View style={styles.benefitRow}>
     <View style={styles.benefitIconBox}>
-      <Icon size={22} color="#0D47A1" />
+      <Icon size={22} color={colors.info} />
     </View>
     <View style={styles.benefitContent}>
       <Text style={styles.benefitTitle}>{title}</Text>
@@ -37,15 +37,50 @@ const BenefitRow = ({ icon: Icon, title, desc }: any) => (
 );
 
 const VolunteerScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
+  const [volunteerStatus, setVolunteerStatus] = useState<VolunteerStatus | null>(null);
+  const [openCount, setOpenCount] = useState<number | null>(null);
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    getMe()
+      .then(res => setVolunteerStatus(res.user.volunteerStatus))
+      .catch(() => setVolunteerStatus(null));
+    getRequestsStats()
+      .then(res => setOpenCount(res.openCount))
+      .catch(() => setOpenCount(null));
+  }, []);
+
+  const isActive = volunteerStatus === 'active';
+
+  const handleToggle = async () => {
+    if (toggling) return;
+    setToggling(true);
+    try {
+      const res = isActive ? await leaveVolunteer() : await joinVolunteer();
+      setVolunteerStatus(res.volunteerStatus);
+      Alert.alert(
+        isActive ? 'No longer volunteering' : "You're in!",
+        isActive
+          ? "You've been removed from the active volunteer list."
+          : "You're now listed as an active volunteer. Thank you."
+      );
+    } catch (err: any) {
+      Alert.alert('Could not update status', err.message || 'Please try again.');
+    } finally {
+      setToggling(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      
+
       {/* HEADER */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
-        <TouchableOpacity style={styles.closeBtn}>
-          <X size={24} color="#000" />
+        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.navigate('Home')}>
+          <X size={24} color={colors.black} />
         </TouchableOpacity>
       </View>
 
@@ -75,9 +110,33 @@ const VolunteerScreen: React.FC = () => {
           />
           <View style={styles.opsFloatingBadge}>
             <View style={styles.orangeDot} />
-            <Text style={styles.opsText}>12 Active Operations Nearby</Text>
+            <Text style={styles.opsText}>
+              {openCount == null ? 'Loading open requests…' : `${openCount} Open Assistance Requests`}
+            </Text>
           </View>
         </View>
+
+        {/* VOLUNTEER STATUS CTA */}
+        <TouchableOpacity
+          style={[styles.statusCta, isActive && styles.statusCtaActive]}
+          onPress={handleToggle}
+          disabled={toggling || volunteerStatus === null}
+          activeOpacity={0.85}
+        >
+          {toggling ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <Text style={styles.statusCtaText}>
+              {isActive ? 'Stop Volunteering' : 'Join as a Volunteer'}
+            </Text>
+          )}
+        </TouchableOpacity>
+        {isActive && (
+          <View style={styles.activeStatusBadge}>
+            <View style={styles.orangeDot} />
+            <Text style={styles.activeStatusText}>YOU ARE AN ACTIVE VOLUNTEER</Text>
+          </View>
+        )}
 
         {/* WHY VOLUNTEER CARD */}
         <View style={styles.infoCard}>
@@ -121,10 +180,9 @@ const VolunteerScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#F9F9F9',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  container: {
+    flex: 1,
+    backgroundColor: colors.backgroundAlt,
   },
   header: {
     flexDirection: 'row',
@@ -208,6 +266,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: '#1A1A1A',
+  },
+  statusCta: {
+    backgroundColor: '#0D47A1',
+    borderRadius: 30,
+    height: 54,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statusCtaActive: {
+    backgroundColor: colors.danger,
+  },
+  statusCtaText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  activeStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  activeStatusText: {
+    color: colors.danger,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   infoCard: {
     backgroundColor: '#FFF',

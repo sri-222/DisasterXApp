@@ -12,6 +12,7 @@ import VolunteerScreen from '../screens/VolunteerScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SosScreen from '../screens/SosScreen';
 import WeatherScreen from '../screens/WeatherScreen';
+import RequestHelpScreen from '../screens/RequestHelpScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -39,6 +40,7 @@ const AppNavigator = () => {
       <Stack.Screen name="Volunteer" component={VolunteerScreen} options={{ animation: 'none' }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ animation: 'none' }} />
       <Stack.Screen name="Weather" component={WeatherScreen} options={{ animation: 'none' }} />
+      <Stack.Screen name="RequestHelp" component={RequestHelpScreen} />
     </Stack.Navigator>
   );
 };

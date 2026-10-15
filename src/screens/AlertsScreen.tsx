@@ -1,58 +1,60 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
-  Image,
-  ImageBackground,
   StatusBar,
-  Dimensions,
-  Platform,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import {
-  Search,
-  SlidersHorizontal,
-  RefreshCw, // Added
-  MapPin,
-  ArrowRight,
-  TrendingUp,
-} from 'lucide-react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { MapPin, ArrowRight, TrendingUp, Globe2 } from 'lucide-react-native';
 import AppHeader from './AppHeader';
 import { useLocation } from './LocationContext';
+import { getLiveAlerts, LiveAlertEvent } from './api';
 import BottomTabBar from '../component/BottomTabBar';
+import { colors, radii, spacing } from '../theme';
 
-const { width } = Dimensions.get('window');
+const SEVERITY_COLOR: Record<LiveAlertEvent['severity'], string> = {
+  Danger: colors.danger,
+  Warning: colors.warning,
+  Info: colors.info,
+  Safe: colors.success,
+};
 
-// 1. Reusable Alert Component
-const SituationAlert = ({ severity, type, title, time, location, description, color }: any) => (
-  <TouchableOpacity activeOpacity={0.9} style={styles.alertCard}>
-    <View style={[styles.severityBar, { backgroundColor: color }]} />
-    <View style={styles.alertContent}>
-      <View style={styles.alertHeaderRow}>
-        <View style={[styles.severityBadge, { backgroundColor: `${color}15` }]}>
-          <Text style={[styles.severityText, { color }]}>{type}</Text>
+const SituationAlert = ({ event }: { event: LiveAlertEvent }) => {
+  const color = SEVERITY_COLOR[event.severity] ?? colors.info;
+  return (
+    <TouchableOpacity activeOpacity={0.9} style={styles.alertCard}>
+      <View style={[styles.severityBar, { backgroundColor: color }]} />
+      <View style={styles.alertContent}>
+        <View style={styles.alertHeaderRow}>
+          <View style={[styles.severityBadge, { backgroundColor: `${color}15` }]}>
+            <Text style={[styles.severityText, { color }]}>{event.severity.toUpperCase()}</Text>
+          </View>
+          <Text style={styles.timeText}>{event.updated}</Text>
         </View>
-        <Text style={styles.timeText}>{time} • TODAY</Text>
-      </View>
-      
-      <Text style={styles.alertTitle}>{title}</Text>
-      <Text style={styles.alertDescription} numberOfLines={2}>
-        {description}
-      </Text>
-      
-      <View style={styles.alertFooter}>
-        <View style={styles.locationContainer}>
-          <MapPin size={14} color="#666" />
-          <Text style={styles.locationText}>{location}</Text>
+
+        <Text style={styles.alertTitle}>{`M${event.magnitude.toFixed(1)} Earthquake`}</Text>
+        <Text style={styles.alertDescription} numberOfLines={2}>
+          {event.detail}
+        </Text>
+
+        <View style={styles.alertFooter}>
+          <View style={styles.locationContainer}>
+            <MapPin size={14} color={colors.textMuted} />
+            <Text style={styles.locationText} numberOfLines={1}>
+              {event.place}
+            </Text>
+          </View>
+          <ArrowRight size={18} color={color} />
         </View>
-        <ArrowRight size={18} color={color} />
       </View>
-    </View>
-  </TouchableOpacity>
-);
+    </TouchableOpacity>
+  );
+};
 
 const AlertsScreen: React.FC = () => {
   const {
@@ -62,28 +64,41 @@ const AlertsScreen: React.FC = () => {
     openLocationSettings,
   } = useLocation();
 
+  const [alerts, setAlerts] = useState<LiveAlertEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const permissionBannerActive =
     isPermissionDenied || locationError?.toLowerCase().includes('permission');
 
-  const handleSearchPress = () => {
-    console.log('Search pressed on Alerts screen');
-  };
+  const loadAlerts = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+    try {
+      const data = await getLiveAlerts(12);
+      setAlerts(data);
+    } catch (err: any) {
+      setError(err.message || 'Unable to load live alerts right now.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
-  const handleFilterPress = () => {
-    console.log('Filter pressed on Alerts screen');
-  };
+  useEffect(() => {
+    loadAlerts();
+  }, [loadAlerts]);
+
+  const criticalCount = alerts.filter(a => a.severity === 'Danger').length;
+  const largestMagnitude = alerts.reduce((max, a) => Math.max(max, a.magnitude), 0);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
-      <AppHeader
-        showLogo
-        showLocation
-        showProfileBtn
-        showSearchBtn
-        onSearchPress={handleSearchPress}
-      />
+      <AppHeader showLogo showLocation showProfileBtn />
       {permissionBannerActive && (
         <View style={styles.permissionBanner}>
           <Text style={styles.permissionText}>
@@ -103,8 +118,10 @@ const AlertsScreen: React.FC = () => {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => loadAlerts(true)} tintColor={colors.danger} />
+        }
       >
-
         {/* TITLE SECTION */}
         <View style={styles.titleSection}>
           <Text style={styles.situationReport}>LIVE SITUATION REPORT</Text>
@@ -112,82 +129,54 @@ const AlertsScreen: React.FC = () => {
           <View style={styles.statsRow}>
             <View style={styles.criticalBadge}>
               <View style={styles.dot} />
-              <Text style={styles.criticalText}>2 CRITICAL</Text>
+              <Text style={styles.criticalText}>{criticalCount} CRITICAL</Text>
             </View>
-            <Text style={styles.lastUpdated}>Last updated: 2 mins ago</Text>
+            <Text style={styles.lastUpdated}>Live from USGS earthquake feed</Text>
           </View>
         </View>
 
-        {/* ALERT 1: CRITICAL */}
-        <SituationAlert
-          type="CRITICAL SEVERITY"
-          title="Flash Flood Warning: Downtown District"
-          time="12:45 PM"
-          location="Coastal Region A-12"
-          description="Immediate evacuation recommended for residents near the harbor and low-lying..."
-          color="#C62828"
-        />
+        {loading && (
+          <View style={styles.centerState}>
+            <ActivityIndicator color={colors.danger} />
+            <Text style={styles.centerStateText}>Loading live alerts…</Text>
+          </View>
+        )}
 
-        {/* SPATIAL CONTEXT MAP CARD */}
-        <TouchableOpacity activeOpacity={0.9} style={styles.mapCard}>
-          <ImageBackground
-            source={{
-              uri:
-                'https://api.mapbox.com/styles/v1/mapbox/dark-v10/static/-73.98,40.75,12,0/600x300?access_token=YOUR_TOKEN',
-            }}
-            style={styles.mapBackground}
-            imageStyle={{ borderRadius: 24 }}
-          >
-            <View style={styles.mapOverlay}>
+        {!loading && error && (
+          <View style={styles.centerState}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        {!loading && !error && alerts.length === 0 && (
+          <View style={styles.centerState}>
+            <Globe2 size={28} color={colors.textFaint} />
+            <Text style={styles.centerStateText}>No active events reported right now.</Text>
+          </View>
+        )}
+
+        {alerts.map(event => (
+          <SituationAlert key={event.id} event={event} />
+        ))}
+
+        {alerts.length > 0 && (
+          <View style={styles.vitalityCard}>
+            <View style={styles.vitalityHeader}>
+              <Text style={styles.vitalityTitle}>REGIONAL VITALITY</Text>
+              <TrendingUp size={20} color={colors.danger} />
+            </View>
+            <View style={styles.statsGrid}>
               <View>
-                <Text style={styles.mapSubtitle}>SPATIAL CONTEXT</Text>
-                <Text style={styles.mapTitle}>Alert Proximity{"\n"}Map</Text>
+                <Text style={styles.statValue}>{alerts.length}</Text>
+                <Text style={styles.statLabel}>EVENTS TRACKED</Text>
               </View>
-              <View style={styles.mapBtn}>
-                <Text style={styles.mapBtnText}>OPEN INTERACTIVE MAP</Text>
+              <View>
+                <Text style={styles.statValue}>{largestMagnitude.toFixed(1)}</Text>
+                <Text style={styles.statLabel}>LARGEST MAGNITUDE</Text>
               </View>
-            </View>
-          </ImageBackground>
-        </TouchableOpacity>
-
-        {/* ALERT 2: HIGH */}
-        <SituationAlert
-          type="HIGH SEVERITY"
-          title="Wildfire Watch: Northern Forest Path"
-          time="11:20 AM"
-          location="Ridge Summit Estates"
-          description="High winds increasing risk of fire spread. All hiking trails closed. Residents stay on..."
-          color="#A66114"
-        />
-
-        {/* ALERT 3: MODERATE */}
-        <SituationAlert
-          type="MODERATE SEVERITY"
-          title="Air Quality Advisory: Industrial Zone"
-          time="09:05 AM"
-          location="East Port Industrial"
-          description="Particulate matter levels elevated. Sensitive groups should limit outdoor activity until..."
-          color="#0D47A1"
-        />
-
-        {/* REGIONAL VITALITY CARD */}
-        <View style={styles.vitalityCard}>
-          <View style={styles.vitalityHeader}>
-            <Text style={styles.vitalityTitle}>REGIONAL VITALITY</Text>
-            <TrendingUp size={20} color="#C62828" />
-          </View>
-          <View style={styles.statsGrid}>
-            <View>
-              <Text style={styles.statValue}>84%</Text>
-              <Text style={styles.statLabel}>SHELTER CAPACITY</Text>
-            </View>
-            <View>
-              <Text style={styles.statValue}>12.4</Text>
-              <Text style={styles.statLabel}>RESPONSE TIME (M)</Text>
             </View>
           </View>
-        </View>
-
+        )}
       </ScrollView>
 
       <BottomTabBar activeTab="ALERTS" />
@@ -196,23 +185,22 @@ const AlertsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#F5F5F5',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
   permissionBanner: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 16,
-    marginHorizontal: 20,
-    padding: 14,
-    marginTop: 10,
-    marginBottom: 20, // Add margin bottom to separate from content
+    backgroundColor: colors.warningLight,
+    borderRadius: radii.lg,
+    marginHorizontal: spacing.xl,
+    padding: spacing.lg - 2,
+    marginTop: spacing.md - 2,
+    marginBottom: spacing.xl,
   },
   permissionText: {
     color: '#BF360C',
     fontSize: 13,
-    marginBottom: 10,
+    marginBottom: spacing.md - 2,
     fontWeight: '500',
   },
   permissionActions: {
@@ -220,20 +208,20 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   permissionBtn: {
-    marginLeft: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    marginLeft: spacing.md - 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm - 2,
     backgroundColor: '#D84315',
-    borderRadius: 12,
+    borderRadius: radii.sm + 4,
   },
   permissionBtnText: {
-    color: '#FFF',
+    color: colors.white,
     fontSize: 12,
     fontWeight: '700',
   },
   scrollContent: {
-    paddingHorizontal: 20, // Use horizontal padding for consistency
-    paddingTop: 20, // Add padding top to separate from header/banner
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
     paddingBottom: 110,
   },
   titleSection: {
@@ -242,14 +230,14 @@ const styles = StyleSheet.create({
   situationReport: {
     fontSize: 12,
     fontWeight: '800',
-    color: '#0D47A1',
+    color: colors.info,
     letterSpacing: 0.5,
   },
   mainTitle: {
     fontSize: 32,
     fontWeight: '800',
-    color: '#1A1A1A',
-    marginVertical: 8,
+    color: colors.textPrimary,
+    marginVertical: spacing.sm,
   },
   statsRow: {
     flexDirection: 'row',
@@ -258,36 +246,52 @@ const styles = StyleSheet.create({
   criticalBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFEBEE',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginRight: 12,
+    backgroundColor: colors.dangerLight,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm - 2,
+    borderRadius: radii.lg,
+    marginRight: spacing.md,
   },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#C62828',
-    marginRight: 6,
+    backgroundColor: colors.danger,
+    marginRight: spacing.sm - 2,
   },
   criticalText: {
-    color: '#C62828',
+    color: colors.danger,
     fontSize: 10,
     fontWeight: '900',
   },
   lastUpdated: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textMuted,
+    flexShrink: 1,
+  },
+  centerState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  centerStateText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 13,
+    textAlign: 'center',
   },
   alertCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: spacing.lg,
     overflow: 'hidden',
     elevation: 2,
-    shadowColor: '#000',
+    shadowColor: colors.black,
     shadowOpacity: 0.05,
     shadowRadius: 10,
   },
@@ -315,18 +319,18 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 11,
-    color: '#666',
+    color: colors.textMuted,
     fontWeight: '600',
   },
   alertTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: colors.textPrimary,
     marginBottom: 8,
   },
   alertDescription: {
     fontSize: 14,
-    color: '#444',
+    color: colors.textSecondary,
     lineHeight: 20,
     marginBottom: 15,
   },
@@ -338,57 +342,18 @@ const styles = StyleSheet.create({
   locationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
   },
   locationText: {
     fontSize: 13,
-    color: '#666',
+    color: colors.textMuted,
     fontWeight: '600',
     marginLeft: 6,
-  },
-  mapCard: {
-    height: 200,
-    marginBottom: 16,
-  },
-  mapBackground: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  mapOverlay: { 
-    padding: 20, 
-    backgroundColor: 'rgba(0,0,0,0.4)', 
-    borderRadius: 24, 
-    flex: 1, 
-    justifyContent: 'space-between',
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  mapSubtitle: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  mapTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: '800',
-    marginTop: 4,
-  },
-  mapBtn: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  mapBtnText: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: '900',
+    flexShrink: 1,
   },
   vitalityCard: {
-    backgroundColor: '#EEEEEE',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 24,
     padding: 25,
     marginTop: 10,
@@ -401,7 +366,7 @@ const styles = StyleSheet.create({
   vitalityTitle: {
     fontSize: 12,
     fontWeight: '800',
-    color: '#444',
+    color: colors.textSecondary,
     letterSpacing: 1,
   },
   statsGrid: {
@@ -411,12 +376,12 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 32,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: colors.textPrimary,
   },
   statLabel: {
     fontSize: 10,
     fontWeight: '800',
-    color: '#666',
+    color: colors.textMuted,
     marginTop: 4,
   },
 });
