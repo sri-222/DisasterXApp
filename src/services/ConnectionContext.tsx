@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { checkRoutes, ConnectionMode, getPendingCount, modeFor, retryPendingMessages } from './sosOutbox';
+import { GatewayHealth, getGatewayStatus } from './gateway';
 
 // One app-wide loop that works out which route is usable right now and
 // retries any SOS still waiting in the outbox. It lives at the app root so
@@ -12,6 +13,8 @@ interface ConnectionState {
   mode: ConnectionMode | 'checking';
   // The phone is on the DisasterX gateway's Wi-Fi (true even when online).
   gatewayReachable: boolean;
+  // What the gateway's /health said last time (mode, radio), if anything.
+  gateway: GatewayHealth | null;
   lastCheckedAt: Date | null;
   refresh: () => Promise<ConnectionMode>;
 }
@@ -19,6 +22,7 @@ interface ConnectionState {
 const ConnectionContext = createContext<ConnectionState>({
   mode: 'checking',
   gatewayReachable: false,
+  gateway: null,
   lastCheckedAt: null,
   refresh: async () => 'offline',
 });
@@ -27,6 +31,7 @@ export const ConnectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [mode, setMode] = useState<ConnectionState['mode']>('checking');
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const [gatewayReachable, setGatewayReachable] = useState(false);
+  const [gateway, setGateway] = useState<GatewayHealth | null>(null);
   const inFlight = useRef<Promise<ConnectionMode> | null>(null);
 
   const refresh = useCallback(() => {
@@ -36,6 +41,7 @@ export const ConnectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const next = modeFor(routes);
       setMode(next);
       setGatewayReachable(routes.gateway);
+      setGateway(routes.gateway ? getGatewayStatus().health : null);
       setLastCheckedAt(new Date());
       if (next !== 'offline' && (await getPendingCount()) > 0) {
         retryPendingMessages(next).catch(() => {});
@@ -70,7 +76,7 @@ export const ConnectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [refresh]);
 
   return (
-    <ConnectionContext.Provider value={{ mode, gatewayReachable, lastCheckedAt, refresh }}>
+    <ConnectionContext.Provider value={{ mode, gatewayReachable, gateway, lastCheckedAt, refresh }}>
       {children}
     </ConnectionContext.Provider>
   );
@@ -83,7 +89,8 @@ export const CONNECTION_COPY: Record<ConnectionState['mode'], { label: string; d
   online: { label: 'Online', detail: 'SOS goes straight to the DisasterX control room.' },
   gateway: {
     label: 'Offline gateway',
-    detail: 'No internet. SOS goes out over LoRa radio from the DisasterX gateway.',
+    detail:
+      'No internet. SOS goes to the DisasterX gateway, which can relay it over LoRa radio. It is confirmed only once the internet is back.',
   },
   offline: {
     label: 'No connection',

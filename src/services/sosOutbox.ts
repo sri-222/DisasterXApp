@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ApiError, CrisisType, checkBackendHealth, submitSos } from '../screens/api';
-import { checkGatewayHealth, formatGatewaySos, sendGatewaySos } from './gateway';
+import { GatewayHttpError, GatewayTimeoutError, checkGatewayHealth, sendSOS as sendToGateway } from './gateway';
+import { getUserProfile } from './userProfileStorage';
 
 // Every SOS goes through this outbox. It is saved on the phone first, so an
 // emergency is never lost when there is no signal, then sent by the best
@@ -8,19 +9,29 @@ import { checkGatewayHealth, formatGatewaySos, sendGatewaySos } from './gateway'
 //
 //   1. The DisasterX server, when it answers. This is the only route with a
 //      real receipt (the server stores it and the control room sees it).
-//   2. The offline LoRa gateway, when the server can't be reached but the
+//   2. The offline ESP32 gateway, when the server can't be reached but the
 //      phone is on the gateway's Wi-Fi. The gateway accepting it only means
-//      it was handed to the radio; nobody confirms reception yet.
+//      the gateway stored it (and may have put it on LoRa radio); nothing
+//      confirms that DisasterX or a rescuer received it.
 //   3. Otherwise it waits here and is retried when either route comes back.
 //
-// An SOS that went out over LoRa is still uploaded to the server later, with
-// the same clientId, so the control room gets a record. The server treats a
-// repeated clientId as the same SOS, so retries never create duplicates.
+// An SOS that went to the gateway is still uploaded to the server later, with
+// the same clientId (the gateway's messageId), so the control room gets a
+// record. The server treats a repeated clientId as the same SOS, so retries
+// never create duplicates.
 
+// Overall state, as honest as we can be (see docs/online-offline-sos.md):
 export type OutboxState =
-  | 'queued' // saved on this phone, not sent anywhere yet
-  | 'gateway_accepted' // handed to the LoRa gateway, server upload pending
-  | 'server_accepted'; // stored by the DisasterX server
+  | 'pending' // saved on this phone; not accepted anywhere yet (or outcome unknown)
+  | 'delivery_unconfirmed' // the gateway accepted it; no server receipt yet
+  | 'delivered' // stored by the DisasterX server (the only "delivered")
+  | 'failed'; // the gateway definitely refused it (400/413); still uploaded to the server later
+
+// What the gateway said about this SOS.
+export type GatewayDeliveryStatus =
+  | 'received_by_gateway' // gateway answered 2xx
+  | 'sent_to_remote' // gateway reported a radio transmit (no acknowledgement)
+  | 'unknown'; // the gateway timed out: it may or may not have it
 
 export interface OutboxItem {
   clientId: string;
@@ -33,6 +44,11 @@ export interface OutboxItem {
   state: OutboxState;
   serverId?: string;
   gatewayAt?: string;
+  gatewayStatus?: GatewayDeliveryStatus;
+  gatewayEventId?: string | null;
+  // Set when a gateway timeout happened on the v2 JSON endpoint, which
+  // de-duplicates by messageId, so trying the gateway again is safe.
+  gatewayRetryable?: boolean;
   serverAt?: string;
   attempts: number;
   lastAttemptAt?: string;
@@ -57,8 +73,10 @@ function randomHex(length: number) {
   return out;
 }
 
+// Also the gateway's messageId: "DX-<base36 time>-<12 hex>". Fits the
+// backend's clientId pattern ^[A-Za-z0-9_-]{8,64}$.
 export function newClientId(now = Date.now()) {
-  return `${now.toString(36)}-${randomHex(12)}`;
+  return `DX-${now.toString(36)}-${randomHex(12)}`;
 }
 
 export async function getDeviceId(): Promise<string> {
@@ -69,12 +87,34 @@ export async function getDeviceId(): Promise<string> {
   return id;
 }
 
+// Items saved by earlier app versions used queued / gateway_accepted /
+// server_accepted; read them as the new states.
+export function migrateItem(item: any): OutboxItem {
+  switch (item?.state) {
+    case 'queued':
+      return { ...item, state: 'pending' };
+    case 'gateway_accepted':
+      return { ...item, state: 'delivery_unconfirmed', gatewayStatus: item.gatewayStatus ?? 'received_by_gateway' };
+    case 'server_accepted':
+      return { ...item, state: 'delivered' };
+    case 'pending':
+    case 'delivery_unconfirmed':
+    case 'delivered':
+    case 'failed':
+      return item;
+    default:
+      return { ...item, state: 'pending' };
+  }
+}
+
 async function load(): Promise<OutboxItem[]> {
   if (items) return items;
   try {
     const raw = await AsyncStorage.getItem(OUTBOX_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    items = Array.isArray(parsed) ? parsed : [];
+    items = Array.isArray(parsed)
+      ? parsed.filter(item => item && typeof item.clientId === 'string').map(migrateItem)
+      : [];
   } catch {
     items = [];
   }
@@ -84,7 +124,7 @@ async function load(): Promise<OutboxItem[]> {
 async function save(next: OutboxItem[]) {
   const cutoff = Date.now() - KEEP_DELIVERED_MS;
   items = next.filter(
-    item => item.state !== 'server_accepted' || new Date(item.serverAt ?? item.createdAt).getTime() > cutoff
+    item => item.state !== 'delivered' || new Date(item.serverAt ?? item.createdAt).getTime() > cutoff
   );
   await AsyncStorage.setItem(OUTBOX_KEY, JSON.stringify(items)).catch(() => {});
   const snapshot = [...items];
@@ -103,7 +143,7 @@ export function subscribeOutbox(listener: (items: OutboxItem[]) => void): () => 
 }
 
 export async function getPendingCount(): Promise<number> {
-  return (await load()).filter(item => item.state !== 'server_accepted').length;
+  return (await load()).filter(item => item.state !== 'delivered').length;
 }
 
 export async function checkRoutes(): Promise<{ server: boolean; gateway: boolean }> {
@@ -121,6 +161,71 @@ export async function getConnectionMode(): Promise<ConnectionMode> {
   return modeFor(await checkRoutes());
 }
 
+// Whether this item may be handed to the gateway now. Never after the gateway
+// accepted or refused it. After a timeout only when that was the v2 endpoint,
+// which de-duplicates by messageId; the v1 text endpoint cannot tell repeats
+// apart, so a resend would reach rescuers as a new emergency.
+export function canSendToGateway(item: OutboxItem) {
+  if (item.state !== 'pending') return false;
+  if (item.gatewayStatus == null) return true;
+  return item.gatewayStatus === 'unknown' && item.gatewayRetryable === true;
+}
+
+// The gateway may hold it (accepted, or timed out with unknown outcome).
+function mayHaveGoneOverGateway(item: OutboxItem) {
+  return item.gatewayStatus != null;
+}
+
+const GATEWAY_EMERGENCY_TYPE: Record<string, string> = { Medical: 'Medical Emergency' };
+
+async function deliverToGateway(item: OutboxItem, attempt: Partial<OutboxItem>) {
+  // Name and phone from the saved profile, empty if there is none. Never logged.
+  const profile = await getUserProfile().catch(() => null);
+  try {
+    const result = await sendToGateway({
+      messageId: item.clientId,
+      emergencyType: GATEWAY_EMERGENCY_TYPE[item.crisisType] ?? item.crisisType,
+      message: item.address
+        ? `Emergency assistance required near ${item.address}`
+        : 'Emergency assistance required',
+      latitude: item.latitude,
+      longitude: item.longitude,
+      createdAt: item.createdAt,
+      deviceId: item.deviceId,
+      name: profile?.name ?? '',
+      phone: profile?.phone ?? '',
+    });
+    await update(item.clientId, {
+      ...attempt,
+      state: 'delivery_unconfirmed',
+      gatewayStatus: result.gatewayStatus,
+      gatewayEventId: result.eventId,
+      gatewayRetryable: undefined,
+      gatewayAt: new Date().toISOString(),
+      lastError: undefined,
+    });
+  } catch (err: any) {
+    if (err instanceof GatewayTimeoutError) {
+      // Unknown outcome. Do not try another route as a new SOS; the server
+      // upload later uses the same clientId and is de-duplicated there.
+      await update(item.clientId, {
+        ...attempt,
+        gatewayStatus: 'unknown',
+        gatewayRetryable: err.path === '/api/sos',
+        lastError: 'The gateway did not answer in time. It may have received this SOS.',
+      });
+    } else if (err instanceof GatewayHttpError && err.isDefiniteRefusal) {
+      await update(item.clientId, { ...attempt, state: 'failed', lastError: err.message });
+    } else {
+      // Network error, 5xx, storage full: not received; try again later.
+      await update(item.clientId, {
+        ...attempt,
+        lastError: err?.message || 'The gateway did not accept the SOS.',
+      });
+    }
+  }
+}
+
 // Tries the item once on the best route. Never throws: the outcome is stored
 // on the item so the screen can show it.
 async function deliver(item: OutboxItem, mode: ConnectionMode) {
@@ -135,13 +240,13 @@ async function deliver(item: OutboxItem, mode: ConnectionMode) {
           longitude: item.longitude ?? undefined,
           address: item.address,
           clientId: item.clientId,
-          channel: item.state === 'gateway_accepted' ? 'lora' : 'app',
+          channel: mayHaveGoneOverGateway(item) ? 'lora' : 'app',
         },
         { timeoutMs: SERVER_TIMEOUT_MS }
       );
       await update(item.clientId, {
         ...attempt,
-        state: 'server_accepted',
+        state: 'delivered',
         serverId: result.id,
         serverAt: new Date().toISOString(),
         lastError: undefined,
@@ -154,35 +259,12 @@ async function deliver(item: OutboxItem, mode: ConnectionMode) {
           : err?.message || 'The server did not accept the SOS.';
       await update(item.clientId, { ...attempt, lastError: message });
       // Fall through to the gateway if the phone is also on its Wi-Fi.
-      if (item.state !== 'queued' || !(await checkGatewayHealth())) return;
+      if (!canSendToGateway(item) || !(await checkGatewayHealth())) return;
     }
   }
 
-  // Send over LoRa only once per SOS: the gateway has no way to tell repeats
-  // apart, so each resend would reach rescuers as a new emergency.
-  if (item.state === 'queued' && (mode === 'gateway' || mode === 'online')) {
-    try {
-      await sendGatewaySos(
-        formatGatewaySos({
-          deviceId: item.deviceId,
-          crisisType: item.crisisType,
-          latitude: item.latitude,
-          longitude: item.longitude,
-          clientId: item.clientId,
-        })
-      );
-      await update(item.clientId, {
-        ...attempt,
-        state: 'gateway_accepted',
-        gatewayAt: new Date().toISOString(),
-        lastError: undefined,
-      });
-    } catch (err: any) {
-      await update(item.clientId, {
-        ...attempt,
-        lastError: err?.message || 'The gateway did not accept the SOS.',
-      });
-    }
+  if (canSendToGateway(item) && (mode === 'gateway' || mode === 'online')) {
+    await deliverToGateway(item, attempt);
   }
 }
 
@@ -191,7 +273,7 @@ async function deliver(item: OutboxItem, mode: ConnectionMode) {
 export function retryPendingMessages(knownMode?: ConnectionMode): Promise<void> {
   if (running) return running;
   running = (async () => {
-    const pending = (await load()).filter(item => item.state !== 'server_accepted');
+    const pending = (await load()).filter(item => item.state !== 'delivered');
     if (!pending.length) return;
     const mode = knownMode ?? (await getConnectionMode());
     if (mode === 'offline') return;
@@ -222,7 +304,7 @@ export async function sendSOS(input: SendSosInput, knownMode?: ConnectionMode): 
     longitude: input.longitude ?? null,
     address: input.address,
     createdAt: new Date().toISOString(),
-    state: 'queued',
+    state: 'pending',
     attempts: 0,
   };
   await save([item, ...(await load())]);
