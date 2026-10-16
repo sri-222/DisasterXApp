@@ -3,34 +3,56 @@ import { StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { RadioTower } from 'lucide-react-native';
-import { GatewayMessage, getLatestGatewayMessage } from '../services/gateway';
+import { GatewayEvent, eventFromV1Message, getEvents, sortEvents } from '../services/gateway';
 import { useConnection } from '../services/ConnectionContext';
 import { timeAgo } from '../services/sosStatus';
 import { colors, radii, spacing } from '../theme';
 
-// Messages heard by the offline LoRa gateway. The gateway only keeps the
-// latest one in memory, so this phone remembers each new one it sees.
+// Events held by the offline gateway (GET /api/events; the v1 firmware's
+// GET /messages, latest only, when that is missing). The gateway keeps them
+// in RAM, so this phone also remembers each one it has seen.
 // Polls only while the screen is open and the phone is on the gateway Wi-Fi.
 
 const POLL_MS = 5000;
-const KEEP = 20;
+const KEEP = 50;
 const STORE_KEY = 'disasterx_radio_messages';
 
-export function mergeMessage(list: GatewayMessage[], next: GatewayMessage | null): GatewayMessage[] {
-  if (!next) return list;
-  // Same text as the newest one we have = the gateway still holds it.
-  if (list[0]?.raw === next.raw) return list;
-  return [next, ...list].slice(0, KEEP);
+// Adds new events, keeps the ones already seen (by eventId / messageId / text),
+// newest first. Returns the same list when nothing changed.
+export function mergeEvents(list: GatewayEvent[], incoming: GatewayEvent[]): GatewayEvent[] {
+  const known = new Set(list.map(event => event.key));
+  const fresh = incoming.filter(event => !known.has(event.key));
+  if (!fresh.length) return list;
+  return sortEvents([...fresh, ...list]).slice(0, KEEP);
+}
+
+// Saved by this or an earlier app version (which stored v1 messages).
+export function readStoredEvents(raw: string | null): GatewayEvent[] {
+  try {
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item: any) =>
+        item && typeof item.key === 'string'
+          ? (item as GatewayEvent)
+          : item && typeof item.raw === 'string'
+          ? eventFromV1Message(item)
+          : null
+      )
+      .filter((item): item is GatewayEvent => item !== null);
+  } catch {
+    return [];
+  }
 }
 
 const GatewayInbox: React.FC = () => {
   const { gatewayReachable } = useConnection();
-  const [messages, setMessages] = useState<GatewayMessage[]>([]);
+  const [events, setEvents] = useState<GatewayEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY)
-      .then(raw => raw && setMessages(JSON.parse(raw)))
+      .then(raw => setEvents(current => mergeEvents(current, readStoredEvents(raw))))
       .catch(() => {});
   }, []);
 
@@ -40,16 +62,21 @@ const GatewayInbox: React.FC = () => {
       let cancelled = false;
       const poll = async () => {
         try {
-          const latest = await getLatestGatewayMessage();
+          const latest = await getEvents();
           if (cancelled) return;
           setError(null);
-          setMessages(current => {
-            const merged = mergeMessage(current, latest);
+          setEvents(current => {
+            const merged = mergeEvents(current, latest);
             if (merged !== current) AsyncStorage.setItem(STORE_KEY, JSON.stringify(merged)).catch(() => {});
             return merged;
           });
-        } catch {
-          if (!cancelled) setError('The gateway is not answering. Check you are on the DisasterX Wi-Fi.');
+        } catch (err: any) {
+          if (cancelled) return;
+          setError(
+            err?.kind === 'malformed'
+              ? 'The gateway answered with something this app could not read.'
+              : 'The gateway is not answering. Check you are on the DisasterX Wi-Fi.'
+          );
         }
       };
       poll();
@@ -61,7 +88,7 @@ const GatewayInbox: React.FC = () => {
     }, [gatewayReachable])
   );
 
-  if (!gatewayReachable && messages.length === 0) return null;
+  if (!gatewayReachable && events.length === 0) return null;
 
   return (
     <View style={styles.card}>
@@ -73,22 +100,27 @@ const GatewayInbox: React.FC = () => {
         {gatewayReachable ? '● Gateway connected' : '○ Gateway not reachable. Showing messages saved earlier.'}
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {messages.length === 0 ? (
-        <Text style={styles.empty}>No radio messages heard yet. New ones appear here within a few seconds.</Text>
+      {events.length === 0 ? (
+        <Text style={styles.empty}>No messages on the gateway yet. New ones appear here within a few seconds.</Text>
       ) : (
-        messages.map(message => (
-          <View key={`${message.receivedAt}-${message.raw}`} style={styles.message}>
+        events.map(event => (
+          <View key={event.key} style={styles.message}>
             <Text style={styles.messageHead}>
-              {`${message.type} · from ${message.sender} · ${timeAgo(message.receivedAt)}`}
-              {message.rssi != null ? ` · signal ${message.rssi} dBm` : ''}
+              {`${event.emergencyType ?? 'Message'} · from ${event.name ?? event.deviceId ?? 'Unknown'} · ${timeAgo(
+                event.receivedAt
+              )}`}
+              {event.source ? ` · via ${event.source}` : ''}
+              {event.rssi != null ? ` · signal ${event.rssi} dBm` : ''}
             </Text>
-            <Text style={styles.messageText}>{message.text}</Text>
+            {event.message ? <Text style={styles.messageText}>{event.message}</Text> : null}
+            {event.location ? <Text style={styles.messageMeta}>{event.location}</Text> : null}
+            {event.eventId ? <Text style={styles.messageMeta}>{`Event ${event.eventId}`}</Text> : null}
           </View>
         ))
       )}
       <Text style={styles.note}>
-        These came over LoRa radio, not the internet. The control room may not have seen them, so call 112 if
-        someone needs help and you can.
+        These are held by the offline gateway, not the internet. The control room may not have seen them, so call
+        112 if someone needs help and you can.
       </Text>
     </View>
   );
@@ -114,6 +146,7 @@ const styles = StyleSheet.create({
   },
   messageHead: { fontSize: 11, fontWeight: '800', color: colors.textMuted },
   messageText: { fontSize: 14, color: colors.textPrimary, marginTop: 4, lineHeight: 19 },
+  messageMeta: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
   note: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.md, lineHeight: 16 },
 });
 

@@ -59,24 +59,41 @@ export function timeAgo(iso: string | null | undefined) {
 }
 
 // How an SOS that is still on this phone reads. Each label says only what is
-// actually known: the LoRa gateway gives no receipt, so "handed to the
-// gateway" never claims that anyone received it.
-export function describeOutboxItem(item: Pick<OutboxItem, 'state'>) {
+// actually known: a gateway answer means the gateway has it, never that
+// DisasterX or a rescuer received it. Only a server receipt says "received".
+export function describeOutboxItem(item: Pick<OutboxItem, 'state'> & Partial<Pick<OutboxItem, 'gatewayStatus'>>) {
   switch (item.state) {
-    case 'server_accepted':
+    case 'delivered':
       return {
         label: 'SOS received by DisasterX',
         detail: 'The control room has your alert. This screen shows when they respond.',
         color: colors.danger,
       };
-    case 'gateway_accepted':
+    case 'delivery_unconfirmed':
       return {
-        label: 'Sent to the offline gateway',
+        label: 'Received by the gateway · not yet confirmed by DisasterX',
         detail:
-          'The DisasterX gateway accepted your SOS and broadcast it over LoRa radio. The gateway cannot confirm that a rescue receiver heard it. It will also be sent to the control room as soon as the internet is back.',
+          item.gatewayStatus === 'sent_to_remote'
+            ? 'The DisasterX gateway stored your SOS and broadcast it over LoRa radio, but nothing confirms that a rescue receiver heard it. It will also be sent to the control room as soon as the internet is back.'
+            : 'The DisasterX gateway stored your SOS. The gateway cannot confirm that a rescue receiver or the control room has it. It will also be sent to the control room as soon as the internet is back.',
         color: colors.warning,
       };
+    case 'failed':
+      return {
+        label: 'The gateway refused this SOS',
+        detail:
+          'The DisasterX gateway did not accept it. It is still saved on this phone and will be sent to the control room when the internet is back. Call 112 if you can.',
+        color: colors.danger,
+      };
     default:
+      if (item.gatewayStatus === 'unknown') {
+        return {
+          label: 'Gateway did not answer in time',
+          detail:
+            'The DisasterX gateway may or may not have your SOS. It stays saved on this phone and goes to the control room with the same reference when the internet is back, so it is not counted twice. If you can, call 112.',
+          color: colors.warning,
+        };
+      }
       return {
         label: 'Saved on this phone',
         detail:

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -64,13 +64,16 @@ const SOSScreen: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const { currentLocation, latitude, longitude, fetchLocation } = useLocation();
   const [latestSos, setLatestSos] = useState<SosReport | null>(null);
-  const { mode, refresh: refreshConnection } = useConnection();
+  const { mode, gatewayReachable, gateway, refresh: refreshConnection } = useConnection();
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [retrying, setRetrying] = useState(false);
+  // State updates land after a render, so two quick taps could both pass a
+  // state check; this ref blocks the second one synchronously.
+  const sendingRef = useRef(false);
 
   useEffect(() => subscribeOutbox(setOutbox), []);
   // SOS that haven't reached the control room yet, newest first.
-  const unsent = outbox.filter(item => item.state !== 'server_accepted');
+  const unsent = outbox.filter(item => item.state !== 'delivered');
 
   const refreshLatestSos = useCallback(() => {
     getMySosHistory()
@@ -87,7 +90,8 @@ const SOSScreen: React.FC = () => {
   );
 
   const handleSendSos = async () => {
-    if (submitting) return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     setSubmitting(true);
     try {
       // Try once for a GPS fix if we don't have one yet, but never hold the
@@ -109,7 +113,8 @@ const SOSScreen: React.FC = () => {
       const noLocation = coords
         ? ''
         : '\n\nYour location could not be found. Turn on location, or call 112 below.';
-      Alert.alert(outcome.label, outcome.detail + noLocation);
+      const eventId = item.gatewayEventId ? `\n\nGateway event ID: ${item.gatewayEventId}` : '';
+      Alert.alert(outcome.label, outcome.detail + eventId + noLocation);
       refreshLatestSos();
       refreshConnection();
     } catch (err: any) {
@@ -119,6 +124,7 @@ const SOSScreen: React.FC = () => {
         err?.message || 'Please call 112 using Direct Call below.'
       );
     } finally {
+      sendingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -168,6 +174,13 @@ const SOSScreen: React.FC = () => {
 
         {/* LOCATION CARD */}
         <Text style={styles.modeHint}>{CONNECTION_COPY[mode].detail}</Text>
+        <Text style={styles.gatewayHint}>
+          {gatewayReachable
+            ? `DisasterX gateway: reachable${gateway?.mode ? ` (${gateway.mode})` : ''}${
+                gateway?.radio?.status ? ` · radio ${gateway.radio.status}` : ''
+              }`
+            : 'DisasterX gateway: not reachable'}
+        </Text>
 
         <View style={styles.locationCard}>
           <LocationMap latitude={latitude} longitude={longitude} />
@@ -252,6 +265,9 @@ const SOSScreen: React.FC = () => {
               </Text>
               <Text style={[styles.statusCardTitle, { color: outcome.color }]}>{outcome.label}</Text>
               <Text style={styles.statusCardDetail}>{outcome.detail}</Text>
+              {item.gatewayEventId ? (
+                <Text style={styles.statusCardDetail}>{`Gateway event ID: ${item.gatewayEventId}`}</Text>
+              ) : null}
               {item.lastError ? <Text style={styles.statusCardError}>{item.lastError}</Text> : null}
               <TouchableOpacity style={styles.retryBtn} onPress={handleRetry} disabled={retrying}>
                 {retrying ? (
@@ -337,6 +353,13 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontWeight: '800',
     fontSize: 12,
+  },
+  gatewayHint: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textFaint,
+    marginTop: -8,
+    marginBottom: 14,
   },
   modeHint: {
     fontSize: 12,

@@ -14,8 +14,18 @@ test('quake magnitudes read in plain words', () => {
 });
 
 test('the gateway state never claims the SOS was received', () => {
-  expect(describeOutboxItem({ state: 'gateway_accepted' }).detail).toMatch(/cannot confirm/);
-  expect(describeOutboxItem({ state: 'queued' }).label).toBe('Saved on this phone');
+  const unconfirmed = describeOutboxItem({ state: 'delivery_unconfirmed' });
+  expect(unconfirmed.label).toBe('Received by the gateway · not yet confirmed by DisasterX');
+  expect(unconfirmed.detail).toMatch(/cannot confirm/);
+  expect(describeOutboxItem({ state: 'delivery_unconfirmed', gatewayStatus: 'sent_to_remote' }).detail).toMatch(
+    /nothing confirms/
+  );
+  expect(describeOutboxItem({ state: 'pending' }).label).toBe('Saved on this phone');
+  expect(describeOutboxItem({ state: 'pending', gatewayStatus: 'unknown' }).label).toMatch(/did not answer/);
+  expect(describeOutboxItem({ state: 'failed' }).label).toMatch(/refused/);
+  for (const state of ['pending', 'delivery_unconfirmed', 'failed'] as const) {
+    expect(describeOutboxItem({ state }).label).not.toMatch(/received by DisasterX|delivered/i);
+  }
 });
 
 test('map tiles cover the box and centre the location', () => {
